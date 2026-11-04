@@ -1,0 +1,54 @@
+{
+  "name": "dating-cloud-backend",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Dating Cloud API (Node.js + Express + MongoDB)",
+  "type": "module",
+  "main": "src/index.js",
+  "engines": {
+    "node": ">=20.9.0"
+  },
+  "scripts": {
+    "dev": "nodemon src/index.js",
+    "start": "node src/index.js",
+    "seed:admin": "node scripts/seedAdmin.js",
+    "seed:verifications": "node scripts/seedVerifications.js",
+    "seed:swipe-abuse": "node scripts/seedSwipeAbuse.js",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "nodemonConfig": {
+    "watch": [
+      "src",
+      ".env"
+    ],
+    "ext": "js,json",
+    "ignore": [
+      "uploads/**",
+      "tests/**"
+    ]
+  },
+  "dependencies": {
+    "bcryptjs": "^3.0.3",
+    "cloudinary": "^2.11.0",
+    "cors": "^2.8.6",
+    "dotenv": "^18.0.7",
+    "express": "^5.3.0",
+    "express-rate-limit": "^8.7.1",
+    "helmet": "^8.3.0",
+    "jsonwebtoken": "^9.0.3",
+    "mongoose": "^9.11.2",
+    "multer": "^2.4.0",
+    "sharp": "^0.35.5",
+    "socket.io": "^4.8.4",
+    "uuid": "^14.0.3"
+  },
+  "devDependencies": {
+    "mongodb-memory-server": "^11.3.0",
+    "nodemon": "^3.1.14",
+    "socket.io-client": "^4.8.4",
+    "supertest": "^7.3.1",
+    "vitest": "^5.0.4",
+    "yaml": "^2.9.1"
+  }
+}

@@ -1,0 +1,29 @@
+// Imports every model in one place so their indexes are registered before the server starts.
+
+export { User } from './User.js';
+export { Profile } from './Profile.js';
+export { OtpSession } from './OtpSession.js';
+export { RefreshToken } from './RefreshToken.js';
+export { Interest } from './Interest.js';
+export { Media } from './Media.js';
+export { Swipe } from './Swipe.js';
+export { Match } from './Match.js';
+export { Conversation } from './Conversation.js';
+export { Message } from './Message.js';
+export { IdempotencyRecord } from './IdempotencyRecord.js';
+export { Block } from './Block.js';
+export { Report } from './Report.js';
+export { Device } from './Device.js';
+export { Notification } from './Notification.js';
+export { NotificationCampaign } from './NotificationCampaign.js';
+export { NotificationPreference } from './NotificationPreference.js';
+export { SubscriptionEntitlement } from './SubscriptionEntitlement.js';
+export { SupportTicket } from './SupportTicket.js';
+export { VerificationRequest } from './VerificationRequest.js';
+export { AuditLog } from './AuditLog.js';
+export { AppSetting } from './AppSetting.js';
+export { CmsContent } from './CmsContent.js';
+export { Coupon } from './Coupon.js';
+export { ReferralCode } from './ReferralCode.js';
+export { UserRiskSignal } from './UserRiskSignal.js';
+export { Experiment } from './Experiment.js';
