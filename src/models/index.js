@@ -27,3 +27,4 @@ export { Coupon } from './Coupon.js';
 export { ReferralCode } from './ReferralCode.js';
 export { UserRiskSignal } from './UserRiskSignal.js';
 export { Experiment } from './Experiment.js';
+export { LoginHistory } from './LoginHistory.js';

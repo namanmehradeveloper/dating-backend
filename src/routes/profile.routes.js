@@ -22,6 +22,9 @@ router.use(requireAuth);
 // GET /api/v1/profile/me — the signed-in member's own profile.
 router.get('/me', profileController.getMyProfile);
 
+// GET /api/v1/profile/login-activity — the signed-in member's own login activity.
+router.get('/login-activity', profileController.getMyLoginActivity);
+
 // PATCH /api/v1/profile/me — partial profile edit (30 per hour).
 router.patch('/me', profileUpdateLimit, profileController.updateMyProfile);
 

@@ -25,6 +25,7 @@ import * as adminSubscriptions from '../services/admin/adminSubscriptions.servic
 import * as adminSupport from '../services/admin/adminSupport.service.js';
 import * as adminSwipes from '../services/admin/adminSwipes.service.js';
 import * as adminUsers from '../services/admin/adminUsers.service.js';
+import * as adminLoginHistory from '../services/admin/adminLoginHistory.service.js';
 import * as adminVerifications from '../services/admin/adminVerifications.service.js';
 import * as auditService from '../services/audit.service.js';
 import * as settingsService from '../services/settings.service.js';
@@ -48,6 +49,15 @@ export async function getDashboard(req, res) {
 // GET /admin/users/stats
 export async function getUserStats(req, res) {
   return ApiResponse.ok(res, await adminUsers.getUserStats());
+}
+
+// GET /admin/login-activity
+export async function listLoginActivity(req, res) {
+  const filters = validators.validateLoginActivityQuery(req.query);
+  return ApiResponse.ok(
+    res,
+    await adminLoginHistory.listLoginActivity(filters, parsePagination(req.query)),
+  );
 }
 
 // GET /admin/users

@@ -89,6 +89,23 @@ export function validateUserListQuery(query) {
   return filters;
 }
 
+// GET /admin/login-activity?q=&fromDate=&toDate=
+export function validateLoginActivityQuery(query) {
+  const details = [];
+  const q = readTextFilter(details, query, 'q', 100);
+  let fromDate;
+  let toDate;
+  if (!isMissing(query.fromDate)) fromDate = checkIsoDate(details, 'fromDate', query.fromDate);
+  if (!isMissing(query.toDate)) toDate = checkIsoDate(details, 'toDate', query.toDate);
+  if (fromDate && toDate && fromDate > toDate) {
+    details.push({ field: 'fromDate', reason: 'OUT_OF_RANGE' });
+  }
+  throwIfInvalid(details);
+
+  if (toDate) toDate.setUTCDate(toDate.getUTCDate() + 1);
+  return { q, fromDate, toDate };
+}
+
 // POST /admin/users — create a member by phone with profile fields.
 export function validateUserCreate(body) {
   requireObjectBody(body);

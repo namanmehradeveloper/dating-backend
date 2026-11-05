@@ -1,6 +1,8 @@
 // HTTP handlers for /profile, /profiles and /interests.
 
 import { ApiResponse } from '../utils/ApiResponse.js';
+import { parsePagination } from '../utils/pagination.js';
+import { listOwnLoginHistory } from '../services/loginHistory.service.js';
 import * as profileService from '../services/profile.service.js';
 import { listInterests } from '../services/interest.service.js';
 import {
@@ -13,6 +15,11 @@ import {
 // GET /profile/me — the signed-in member's own profile.
 export async function getMyProfile(req, res) {
   return ApiResponse.ok(res, await profileService.getMyProfile(req.user.id));
+}
+
+// GET /profile/login-activity — the signed-in member's own login history.
+export async function getMyLoginActivity(req, res) {
+  return ApiResponse.ok(res, await listOwnLoginHistory(req.user.id, parsePagination(req.query)));
 }
 
 // POST /profile/onboarding — creates the profile once after the first sign-in.

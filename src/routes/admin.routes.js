@@ -3,7 +3,7 @@
 
 import { Router } from 'express';
 import * as adminController from '../controllers/admin.controller.js';
-import { requireAuth, requireMinRank, requireStaff } from '../middlewares/auth.middleware.js';
+import { requireAuth, requireMinRank, requirePermission, requireStaff } from '../middlewares/auth.middleware.js';
 import { byUser, createRateLimiter, MINUTE } from '../utils/rateLimit.js';
 
 const router = Router();
@@ -22,6 +22,9 @@ router.get('/me', adminController.getMe);
 router.get('/dashboard', adminController.getDashboard);
 
 // ---- Users ----
+
+// GET /api/v1/admin/login-activity — cross-user login history (AUDIT_LOGS.VIEW).
+router.get('/login-activity', requirePermission('AUDIT_LOGS', 'VIEW'), adminController.listLoginActivity);
 
 // GET /api/v1/admin/users/stats — KPI counts for the users page.
 router.get('/users/stats', adminController.getUserStats);

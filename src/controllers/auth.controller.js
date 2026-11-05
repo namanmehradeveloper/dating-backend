@@ -5,6 +5,8 @@ import { ApiResponse } from '../utils/ApiResponse.js';
 import * as authService from '../services/auth.service.js';
 import { requestOtp } from '../services/otp.service.js';
 import { rotateRefreshToken } from '../services/token.service.js';
+import { recordLoginActivity } from '../services/loginHistory.service.js';
+import { logger } from '../utils/logger.js';
 import {
   SOCIAL_PROVIDERS,
   validateLogin,
@@ -15,6 +17,17 @@ import {
   validateSocialSignIn,
   validateTwoFactorLogin,
 } from '../validators/auth.validator.js';
+
+async function trackLogin(req, userId) {
+  try {
+    await recordLoginActivity(userId, {
+      ipAddress: req.ip,
+      userAgent: req.get('user-agent'),
+    });
+  } catch (error) {
+    logger.error('Failed to save login activity', { userId, error: error.message });
+  }
+}
 
 // POST /auth/otp/request — starts a sign-in code session (no SMS in fixed mode).
 export async function requestOtpCode(req, res) {
@@ -27,6 +40,7 @@ export async function requestOtpCode(req, res) {
 export async function verifyOtpCode(req, res) {
   const input = validateOtpVerify(req.body);
   const result = await authService.signInWithOtp(input);
+  await trackLogin(req, result.user.id);
   return ApiResponse.ok(res, result);
 }
 
@@ -61,6 +75,7 @@ export async function register(req, res) {
 export async function login(req, res) {
   const input = validateLogin(req.body);
   const result = await authService.signInWithEmail(input);
+  await trackLogin(req, result.user.id);
   return ApiResponse.ok(res, result);
 }
 
@@ -68,6 +83,7 @@ export async function login(req, res) {
 export async function loginWithTwoFactor(req, res) {
   const input = validateTwoFactorLogin(req.body);
   const result = await authService.completeTwoFactorLogin(input);
+  await trackLogin(req, result.user.id);
   return ApiResponse.ok(res, result);
 }
 

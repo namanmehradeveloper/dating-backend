@@ -9,6 +9,7 @@ import {
   flattenPermissions,
   getPermissionsForRole,
   getRankForRole,
+  hasPermission,
   isAdminTier,
   isStaffRole,
 } from '../services/rbac.service.js';
@@ -82,6 +83,15 @@ export async function requireStaff(req, res, next) {
   req.user.rank = await getRankForRole(req.user.role);
   req.user.isAdminTier = isAdminTier(req.user.role);
   next();
+}
+
+// Allows a staff member through only when their resolved role includes the requested permission.
+export function requirePermission(module, action) {
+  return function checkPermission(req, res, next) {
+    if (!req.user) throw ApiError.unauthenticated();
+    if (!hasPermission(req.user.permissions, module, action)) throw ApiError.forbidden();
+    next();
+  };
 }
 
 // ADMIN and SUPER_ADMIN (and any future role with rank >= ADMIN).
