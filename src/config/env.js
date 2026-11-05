@@ -263,7 +263,7 @@ export function loadEnv(source = process.env) {
     corsOrigins: Object.freeze(readCorsOrigins(source, problems, isProduction)),
     ...readJwtSettings(source, problems, isProduction),
     ...readOtpSettings(source, problems, isProduction),
-    trustProxy: readInteger(source, problems, 'TRUST_PROXY', 0, 0, 10),
+    trustProxy: readInteger(source, problems, 'TRUST_PROXY', source.RENDER === 'true' ? 1 : 0, 0, 10),
     jsonBodyLimit: readText(source, 'JSON_BODY_LIMIT', '100kb'),
     // Local disk fallback when Cloudinary is off (tests). Production uses Cloudinary.
     uploadsDir: path.resolve(BACKEND_ROOT, readText(source, 'UPLOADS_DIR', 'uploads')),

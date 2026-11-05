@@ -7,6 +7,7 @@ import { requestOtp } from '../services/otp.service.js';
 import { rotateRefreshToken } from '../services/token.service.js';
 import { recordLoginActivity } from '../services/loginHistory.service.js';
 import { logger } from '../utils/logger.js';
+import { resolveClientIp } from '../utils/clientIp.js';
 import {
   SOCIAL_PROVIDERS,
   validateLogin,
@@ -21,7 +22,7 @@ import {
 async function trackLogin(req, userId) {
   try {
     await recordLoginActivity(userId, {
-      ipAddress: req.ip,
+      ipAddress: resolveClientIp(req),
       userAgent: req.get('user-agent'),
     });
   } catch (error) {

@@ -46,7 +46,14 @@ describe('loadEnv', () => {
     expect(env.otpResendSeconds).toBe(30);
     expect(env.uploadsDir.replace(/\\/g, '/')).toMatch(/backend\/uploads$/);
     expect(env.cloudinary.enabled).toBe(false);
+    expect(env.trustProxy).toBe(0);
     expect(Object.isFrozen(env)).toBe(true);
+  });
+
+  it('trusts Render’s single proxy hop by default, while allowing an explicit override', () => {
+    expect(loadEnv({ ...base, RENDER: 'true' }).trustProxy).toBe(1);
+    expect(loadEnv({ ...base, RENDER: 'true', TRUST_PROXY: '0' }).trustProxy).toBe(0);
+    expect(loadEnv({ ...base, RENDER: 'true', TRUST_PROXY: '2' }).trustProxy).toBe(2);
   });
 
   it('enables Cloudinary when all three credentials are set', () => {

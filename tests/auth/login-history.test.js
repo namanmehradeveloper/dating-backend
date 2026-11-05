@@ -4,8 +4,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createApp } from '../../src/app.js';
 import { LoginHistory } from '../../src/models/LoginHistory.js';
 import { User } from '../../src/models/User.js';
+import { bearer, nextPhoneNumber, useTestDatabase } from '../helpers/factories.js';
 import { recordLoginActivity } from '../../src/services/loginHistory.service.js';
-import { nextPhoneNumber, useTestDatabase } from '../helpers/factories.js';
 
 const app = createApp();
 
@@ -32,6 +32,82 @@ describe('login activity tracking', () => {
       operatingSystem: 'iOS',
     });
     expect(history.loginAt).toBeInstanceOf(Date);
+  });
+
+  it('geolocates Render-forwarded public IPs, stores the result, and returns it from the self API', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        success: true,
+        country: 'United States',
+        region: 'California',
+        city: 'San Jose',
+      }),
+    }));
+    const phoneNumber = nextPhoneNumber();
+    await request(app).post('/api/v1/auth/otp/request').send({ phoneNumber });
+
+    const login = await request(app)
+      .post('/api/v1/auth/otp/verify')
+      .set('X-Forwarded-For', '8.8.8.8')
+      .set('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0 Safari/537.36')
+      .send({ phoneNumber, code: '123456' });
+
+    expect(login.status).toBe(200);
+    expect(fetch).toHaveBeenCalledWith(
+      'https://ipwho.is/8.8.8.8',
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
+
+    const history = await LoginHistory.findOne({ userId: login.body.data.user.id });
+    expect(history).toMatchObject({
+      ipAddress: '8.8.8.8',
+      country: 'United States',
+      state: 'California',
+      city: 'San Jose',
+    });
+
+    const response = await request(app)
+      .get('/api/v1/profile/login-activity')
+      .set(bearer(login.body.data.tokens.accessToken));
+    expect(response.status).toBe(200);
+    expect(response.body.data.items[0]).toMatchObject({
+      ipAddress: '8.8.8.8',
+      country: 'United States',
+      state: 'California',
+      city: 'San Jose',
+      deviceName: 'Windows PC',
+      deviceType: 'DESKTOP',
+      browser: 'Chrome',
+      operatingSystem: 'Windows',
+    });
+  });
+
+  it('uses the nearest public address in Render’s proxy chain and ignores x-real-ip', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ success: true, country: 'United States', region: 'California', city: 'San Jose' }),
+    }));
+    const phoneNumber = nextPhoneNumber();
+    await request(app).post('/api/v1/auth/otp/request').send({ phoneNumber });
+
+    const login = await request(app)
+      .post('/api/v1/auth/otp/verify')
+      .set('X-Forwarded-For', '203.0.113.9, 8.8.8.8, 10.31.99.80')
+      .set('X-Real-IP', '1.1.1.1')
+      .send({ phoneNumber, code: '123456' });
+
+    expect(login.status).toBe(200);
+    expect(fetch).toHaveBeenCalledWith(
+      'https://ipwho.is/8.8.8.8',
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
+    expect(await LoginHistory.findOne({ userId: login.body.data.user.id })).toMatchObject({
+      ipAddress: '8.8.8.8',
+      country: 'United States',
+      state: 'California',
+      city: 'San Jose',
+    });
   });
 
   it('records successful email/password logins only', async () => {

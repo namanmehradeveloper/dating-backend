@@ -1,36 +1,10 @@
-import { isIP } from 'node:net';
 import { LoginHistory } from '../models/LoginHistory.js';
 import { logger } from '../utils/logger.js';
 import { buildPage, getAfterCursorFilter, getPageSort } from '../utils/pagination.js';
-
-function normalizeIpAddress(value) {
-  if (typeof value !== 'string') return undefined;
-  const ipAddress = value.trim().replace(/^::ffff:/i, '');
-  return isIP(ipAddress) ? ipAddress : undefined;
-}
-
-function isPublicIp(ipAddress) {
-  const normalized = ipAddress.toLowerCase();
-  if (normalized.includes(':')) {
-    if (normalized.startsWith('::ffff:')) return isPublicIp(normalized.slice(7));
-    return normalized !== '::' && normalized !== '::1'
-      && !/^f[cd]/.test(normalized)
-      && !/^fe[89ab]/.test(normalized);
-  }
-
-  const [first, second] = normalized.split('.').map(Number);
-  return first !== 0
-    && first !== 10
-    && first !== 127
-    && first < 224
-    && !(first === 100 && second >= 64 && second <= 127)
-    && !(first === 169 && second === 254)
-    && !(first === 172 && second >= 16 && second <= 31)
-    && !(first === 192 && second === 168);
-}
+import { isPublicIpAddress } from '../utils/clientIp.js';
 
 async function lookupLocation(ipAddress) {
-  if (!ipAddress || !isPublicIp(ipAddress)) return {};
+  if (!ipAddress || !isPublicIpAddress(ipAddress)) return {};
 
   const response = await fetch(`https://ipwho.is/${encodeURIComponent(ipAddress)}`, {
     signal: AbortSignal.timeout(1500),
@@ -83,17 +57,16 @@ function parseDevice(userAgent = '') {
 }
 
 export async function recordLoginActivity(userId, { ipAddress, userAgent } = {}) {
-  const normalizedIp = normalizeIpAddress(ipAddress);
   let location = {};
   try {
-    location = await lookupLocation(normalizedIp);
+    location = await lookupLocation(ipAddress);
   } catch (error) {
     logger.warn('Login IP geolocation failed', { error: error.message });
   }
 
   await LoginHistory.create({
     userId,
-    ipAddress: normalizedIp,
+    ipAddress,
     ...location,
     ...parseDevice(userAgent),
     loginAt: new Date(),

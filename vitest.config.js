@@ -11,6 +11,7 @@ export default defineConfig({
     hookTimeout: 120_000,
     env: {
       NODE_ENV: 'test',
+      TRUST_PROXY: '1',
       PORT: '5050',
       MONGODB_URI: 'mongodb://127.0.0.1:27017/dating_cloud_test_unused',
       APP_URL: 'http://127.0.0.1:5050',
