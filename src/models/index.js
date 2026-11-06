@@ -9,6 +9,7 @@ export { Media } from './Media.js';
 export { Swipe } from './Swipe.js';
 export { Match } from './Match.js';
 export { Conversation } from './Conversation.js';
+export { Call } from './Call.js';
 export { Message } from './Message.js';
 export { IdempotencyRecord } from './IdempotencyRecord.js';
 export { Block } from './Block.js';

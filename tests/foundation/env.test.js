@@ -46,6 +46,8 @@ describe('loadEnv', () => {
     expect(env.otpResendSeconds).toBe(30);
     expect(env.uploadsDir.replace(/\\/g, '/')).toMatch(/backend\/uploads$/);
     expect(env.cloudinary.enabled).toBe(false);
+    expect(env.agora.enabled).toBe(false);
+    expect(env.callRingTimeoutSeconds).toBe(30);
     expect(env.trustProxy).toBe(0);
     expect(Object.isFrozen(env)).toBe(true);
   });
@@ -70,6 +72,18 @@ describe('loadEnv', () => {
   it('rejects partial Cloudinary credentials', () => {
     const problems = problemsFor({ ...base, CLOUDINARY_CLOUD_NAME: 'demo' });
     expect(problems.some((p) => p.includes('CLOUDINARY_'))).toBe(true);
+  });
+
+  it('requires both Agora credentials when either is configured', () => {
+    const problems = problemsFor({ ...base, AGORA_APP_ID: '0123456789abcdef0123456789abcdef' });
+    expect(problems).toContain('AGORA_APP_ID and AGORA_APP_CERTIFICATE must both be set to enable calling');
+    const configured = loadEnv({
+      ...base,
+      AGORA_APP_ID: '0123456789abcdef0123456789abcdef',
+      AGORA_APP_CERTIFICATE: 'abcdef0123456789abcdef0123456789',
+    });
+    expect(configured.agora).toMatchObject({ enabled: true, appId: '0123456789abcdef0123456789abcdef' });
+    expect(configured.agora.appCertificate).toBe('abcdef0123456789abcdef0123456789');
   });
 
   it('requires Cloudinary in production', () => {

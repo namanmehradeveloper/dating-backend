@@ -240,6 +240,24 @@ function readCloudinarySettings(source, problems, isProduction) {
   };
 }
 
+// Reads Agora credentials as an optional pair. The certificate stays server-side.
+function readAgoraSettings(source, problems) {
+  const appId = readText(source, 'AGORA_APP_ID');
+  const appCertificate = readText(source, 'AGORA_APP_CERTIFICATE');
+  if (Boolean(appId) !== Boolean(appCertificate)) {
+    problems.push('AGORA_APP_ID and AGORA_APP_CERTIFICATE must both be set to enable calling');
+  }
+  if (appId && !/^[a-f\d]{32}$/i.test(appId)) problems.push('AGORA_APP_ID must be a 32-character hexadecimal value');
+  if (appCertificate && !/^[a-f\d]{32}$/i.test(appCertificate)) {
+    problems.push('AGORA_APP_CERTIFICATE must be a 32-character hexadecimal value');
+  }
+  return {
+    enabled: Boolean(appId && appCertificate),
+    appId: appId || undefined,
+    appCertificate: appCertificate || undefined,
+  };
+}
+
 // Validates a raw environment (normally process.env) and returns the frozen configuration object.
 // Every problem is collected first and thrown as one ConfigError, so a broken .env is fixed in one pass.
 export function loadEnv(source = process.env) {
@@ -269,6 +287,8 @@ export function loadEnv(source = process.env) {
     uploadsDir: path.resolve(BACKEND_ROOT, readText(source, 'UPLOADS_DIR', 'uploads')),
     currentTermsVersion: readText(source, 'TERMS_VERSION', '2026-01'),
     cloudinary: Object.freeze(cloudinary),
+    agora: Object.freeze(readAgoraSettings(source, problems)),
+    callRingTimeoutSeconds: readInteger(source, problems, 'CALL_RING_TIMEOUT_SECONDS', 30, 10, 120),
   };
 
   if (problems.length > 0) throw new ConfigError(problems);

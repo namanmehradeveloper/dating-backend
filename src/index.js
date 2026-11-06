@@ -10,6 +10,7 @@ import { startAccountDeletionJob } from './jobs/accountDeletion.job.js';
 import { ensureDefaultInterests } from './services/interest.service.js';
 import { ensureUploadFolders } from './services/media.service.js';
 import { createSocketServer } from './socket/index.js';
+import { startCallExpiryJob } from './services/call.service.js';
 import { logger } from './utils/logger.js';
 
 // Connects to MongoDB and starts the HTTP server. Exits when the database is unreachable.
@@ -39,6 +40,7 @@ async function startServer() {
   await ensureUploadFolders();
   await ensureDefaultInterests();
   startAccountDeletionJob();
+  const stopCallExpiryJob = startCallExpiryJob();
 
   const server = http.createServer(createApp());
   const io = createSocketServer(server);
@@ -47,11 +49,11 @@ async function startServer() {
     logger.info(`Socket.IO listening on ws://127.0.0.1:${env.port}/v1`);
   });
 
-  listenForShutdown(server, io);
+  listenForShutdown(server, io, stopCallExpiryJob);
 }
 
 // Closes the server and the database connection cleanly when the process is stopped (Ctrl+C or SIGTERM).
-function listenForShutdown(server, io) {
+function listenForShutdown(server, io, stopCallExpiryJob) {
   let isShuttingDown = false;
 
   // Runs once per process: stops accepting requests, closes MongoDB, then exits.
@@ -60,6 +62,7 @@ function listenForShutdown(server, io) {
     isShuttingDown = true;
 
     logger.info(`${signal} received, shutting down`);
+    stopCallExpiryJob();
     io.close();
     server.close();
     await disconnectDB().catch(() => {});

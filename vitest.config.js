@@ -25,6 +25,8 @@ export default defineConfig({
       OTP_EXPIRY_SECONDS: '300',
       OTP_RESEND_SECONDS: '30',
       UPLOADS_DIR: 'tests/.uploads',
+      AGORA_APP_ID: '0123456789abcdef0123456789abcdef',
+      AGORA_APP_CERTIFICATE: 'abcdef0123456789abcdef0123456789',
     },
   },
 });

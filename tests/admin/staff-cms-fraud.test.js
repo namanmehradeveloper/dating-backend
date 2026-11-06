@@ -186,7 +186,7 @@ describe('admin staff, CMS, fraud and related modules', () => {
     expect(running.body.data.startedAt).toBeTruthy();
   });
 
-  it('returns monitoring and honest call/payment stubs for ADMIN', async () => {
+  it('returns monitoring, call configuration and honest payment status for ADMIN', async () => {
     const admin = await createStaff('ADMIN');
     const moderator = await createStaff('MODERATOR');
 
@@ -202,7 +202,7 @@ describe('admin staff, CMS, fraud and related modules', () => {
       api: { windowMinutes: 15 },
       database: { ok: true },
       media: { processing: { queueConfigured: false } },
-      calls: { configured: false },
+      calls: { configured: true },
       payments: { configured: false },
       jobs: { broker: 'in-process' },
       infrastructureCost: { configured: false },
@@ -213,7 +213,7 @@ describe('admin staff, CMS, fraud and related modules', () => {
     expect(monitoring.body.data.jobs.items.some((job) => job.id === 'account-deletion-purge')).toBe(true);
 
     const calls = await request(app).get('/api/v1/admin/calls/status').set(bearer(admin.token));
-    expect(calls.body.data.configured).toBe(false);
+    expect(calls.body.data.configured).toBe(true);
 
     const payments = await request(app).get('/api/v1/admin/payments/status').set(bearer(admin.token));
     expect(payments.body.data.configured).toBe(false);

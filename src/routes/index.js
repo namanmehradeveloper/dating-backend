@@ -7,6 +7,7 @@ import profileRoutes from './profile.routes.js';
 import mediaRoutes from './media.routes.js';
 import discoveryRoutes from './discovery.routes.js';
 import chatRoutes from './chat.routes.js';
+import callRoutes from './call.routes.js';
 import safetyRoutes from './safety.routes.js';
 import notificationRoutes from './notification.routes.js';
 import subscriptionRoutes from './subscription.routes.js';
@@ -40,6 +41,9 @@ router.use(discoveryRoutes);
 
 // /api/v1/conversations, /messages — chat.
 router.use(chatRoutes);
+
+// /api/v1/calls — authenticated voice and video call signalling.
+router.use('/calls', callRoutes);
 
 // /api/v1/users/:userId/block, /blocks, /reports — blocking and reporting.
 router.use(safetyRoutes);

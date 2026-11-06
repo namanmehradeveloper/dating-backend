@@ -1,5 +1,5 @@
 // Live system monitoring for ADMIN: API latency, DB/process health, sockets, media,
-// jobs, and honest stubs for calls / payments / infrastructure cost (not configured).
+// jobs, and honest stubs for payments / infrastructure cost (not configured).
 
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -116,7 +116,7 @@ function buildAlerts({ api, database, jobs, payments, calls }) {
     alerts.push({
       severity: 'info',
       source: 'calls',
-      message: 'Voice/video call signaling is not implemented',
+      message: 'Agora voice/video calling credentials are not configured',
     });
   }
   return alerts;
