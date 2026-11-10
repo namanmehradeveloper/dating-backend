@@ -238,9 +238,12 @@ router.get('/experiments/:id', adminOnly, adminController.getExperiment);
 router.post('/experiments', adminOnly, adminController.createExperiment);
 router.patch('/experiments/:id', adminOnly, adminController.updateExperiment);
 
-// ---- Calls / payments stubs (ADMIN only) ----
+// ---- Calls / payments (ADMIN only) ----
 
 router.get('/calls/status', adminOnly, adminController.getCallsStatus);
+router.get('/calls/stats', adminOnly, adminController.getCallsStats);
+router.get('/calls', adminOnly, adminController.listCalls);
+router.get('/calls/:callId', adminOnly, adminController.getCall);
 router.get('/payments/status', adminOnly, adminController.getPaymentsStatus);
 
 export default router;

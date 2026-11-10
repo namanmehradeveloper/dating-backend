@@ -624,10 +624,24 @@ export async function updateExperiment(req, res) {
   return ApiResponse.ok(res, await adminExperiments.updateExperiment(req.user, req.params.id, changes));
 }
 
-// ---- Calls / payments stubs (ADMIN) ----
+// ---- Calls (ADMIN) / payments stub ----
 
 export async function getCallsStatus(req, res) {
   return ApiResponse.ok(res, adminCalls.getCallsStatus());
+}
+
+export async function getCallsStats(req, res) {
+  const { days } = validators.validateDaysQuery(req.query);
+  return ApiResponse.ok(res, await adminCalls.getCallsStats({ days }));
+}
+
+export async function listCalls(req, res) {
+  const filters = validators.validateCallsListQuery(req.query);
+  return ApiResponse.ok(res, await adminCalls.listCalls(filters, parsePagination(req.query)));
+}
+
+export async function getCall(req, res) {
+  return ApiResponse.ok(res, await adminCalls.getCall(req.params.callId));
 }
 
 export async function getPaymentsStatus(req, res) {

@@ -4,6 +4,7 @@ import { EDITABLE_SETTINGS } from '../config/catalog.js';
 import { CMS_STATUSES, CMS_TYPES } from '../models/CmsContent.js';
 import { COUPON_TIERS, COUPON_TYPES } from '../models/Coupon.js';
 import { EXPERIMENT_STATUSES } from '../models/Experiment.js';
+import { CALL_STATUSES, CALL_TYPES } from '../models/Call.js';
 import { CONVERSATION_STATUSES } from '../models/Conversation.js';
 import { MATCH_STATUSES } from '../models/Match.js';
 import { CAMPAIGN_AUDIENCES, CAMPAIGN_TYPES } from '../models/NotificationCampaign.js';
@@ -351,6 +352,18 @@ export function validateMessagingListQuery(query) {
   const details = [];
   const filters = {
     status: readEnumFilter(details, query, 'status', CONVERSATION_STATUSES),
+    q: readTextFilter(details, query, 'q', 100),
+  };
+  throwIfInvalid(details);
+  return filters;
+}
+
+// GET /admin/calls?type=&status=&q=
+export function validateCallsListQuery(query) {
+  const details = [];
+  const filters = {
+    type: readEnumFilter(details, query, 'type', CALL_TYPES),
+    status: readEnumFilter(details, query, 'status', CALL_STATUSES),
     q: readTextFilter(details, query, 'q', 100),
   };
   throwIfInvalid(details);
