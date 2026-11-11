@@ -13,7 +13,7 @@ import apiRoutes from './routes/index.js';
 
 export const API_PREFIX = '/api/v1';
 
-// CORS settings for the React admin, which calls the API directly from the browser.
+// CORS settings for browser apps (admin + web) that call the API directly (no proxy).
 // Origins not in the allow-list get no CORS headers, so the browser blocks them.
 // Flutter native apps send no Origin header and are not affected.
 export function corsOptions(allowedOrigins = env.corsOrigins) {

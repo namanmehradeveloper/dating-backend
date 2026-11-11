@@ -10,7 +10,13 @@ export const BACKEND_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.
 
 const NODE_ENVS = ['development', 'test', 'production'];
 const OTP_MODES = ['fixed', 'sms'];
-const DEV_ADMIN_ORIGINS = ['http://127.0.0.1:5173', 'http://localhost:5173'];
+// Local browser apps that call the API directly (admin Vite + member Next.js).
+const DEV_BROWSER_ORIGINS = [
+  'http://127.0.0.1:5173',
+  'http://localhost:5173',
+  'http://127.0.0.1:3000',
+  'http://localhost:3000',
+];
 const PLACEHOLDER_SECRET_PREFIX = 'change_this';
 const MIN_PRODUCTION_SECRET_LENGTH = 32;
 const SECONDS_PER_UNIT = { s: 1, m: 60, h: 3600, d: 86400 };
@@ -118,7 +124,7 @@ function readAppUrl(source, problems, port) {
   return appUrl;
 }
 
-// Reads one comma-separated list of browser origins (ADMIN_URL or CLIENT_URL) into `origins`.
+// Reads one comma-separated list of browser origins into `origins`.
 function readOriginList(source, problems, key, origins) {
   const entries = readText(source, key, '').split(',');
 
@@ -135,20 +141,22 @@ function readOriginList(source, problems, key, origins) {
   }
 }
 
-// Builds the CORS allow-list for the React admin from ADMIN_URL (CLIENT_URL is an older alias).
-// In development the local Vite origins are always allowed; in production only the listed origins are.
+// Builds the CORS allow-list for browser apps that call the API directly (admin + web).
+// ADMIN_URL / WEB_URL / CLIENT_URL (legacy alias) are merged. In development the local
+// Vite (5173) and Next.js (3000) origins are always allowed; production uses only the list.
 function readCorsOrigins(source, problems, isProduction) {
   const clientOrigins = [];
   readOriginList(source, problems, 'ADMIN_URL', clientOrigins);
+  readOriginList(source, problems, 'WEB_URL', clientOrigins);
   readOriginList(source, problems, 'CLIENT_URL', clientOrigins);
 
   if (isProduction) {
     if (clientOrigins.length === 0) {
-      problems.push('CLIENT_URL or ADMIN_URL must list the admin panel origin(s) in production');
+      problems.push('ADMIN_URL, WEB_URL, or CLIENT_URL must list the browser app origin(s) in production');
     }
     return [...new Set(clientOrigins)];
   }
-  return [...new Set([...DEV_ADMIN_ORIGINS, ...clientOrigins])];
+  return [...new Set([...DEV_BROWSER_ORIGINS, ...clientOrigins])];
 }
 
 // Reads one JWT signing secret. Production rejects the placeholder values and secrets that are too short.

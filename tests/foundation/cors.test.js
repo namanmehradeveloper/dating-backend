@@ -8,7 +8,12 @@ describe('CORS (direct browser calls from the React admin, no proxy)', () => {
   const app = createApp();
   const path = '/api/v1/unknown-route';
 
-  it.each(['http://127.0.0.1:5173', 'http://localhost:5173'])('allows the local admin origin %s', async (origin) => {
+  it.each([
+    'http://127.0.0.1:5173',
+    'http://localhost:5173',
+    'http://127.0.0.1:3000',
+    'http://localhost:3000',
+  ])('allows the local browser origin %s', async (origin) => {
     const res = await request(app).get(path).set('Origin', origin);
     expect(res.headers['access-control-allow-origin']).toBe(origin);
     expect(res.headers['access-control-expose-headers']).toMatch(/X-Request-Id/);

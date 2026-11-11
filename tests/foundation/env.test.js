@@ -135,19 +135,36 @@ describe('loadEnv', () => {
   });
 
   describe('CORS origins', () => {
-    it('always allows the local Vite admin origins outside production', () => {
+    it('always allows local Vite and Next.js origins outside production', () => {
       const env = loadEnv({ ...base, CLIENT_URL: 'http://127.0.0.1:5173, http://192.168.1.10:5173/' });
-      expect(env.corsOrigins).toEqual(['http://127.0.0.1:5173', 'http://localhost:5173', 'http://192.168.1.10:5173']);
+      expect(env.corsOrigins).toEqual([
+        'http://127.0.0.1:5173',
+        'http://localhost:5173',
+        'http://127.0.0.1:3000',
+        'http://localhost:3000',
+        'http://192.168.1.10:5173',
+      ]);
     });
 
-    it('uses only CLIENT_URL in production', () => {
+    it('merges ADMIN_URL and WEB_URL with CLIENT_URL', () => {
+      const env = loadEnv({
+        ...production,
+        ALLOW_FIXED_OTP: 'true',
+        CLIENT_URL: '',
+        ADMIN_URL: 'https://admin.example.com',
+        WEB_URL: 'https://web.example.com',
+      });
+      expect(env.corsOrigins).toEqual(['https://admin.example.com', 'https://web.example.com']);
+    });
+
+    it('uses only listed origins in production', () => {
       const env = loadEnv({ ...production, ALLOW_FIXED_OTP: 'true' });
       expect(env.corsOrigins).toEqual(['https://admin.example.com']);
     });
 
-    it('requires CLIENT_URL in production', () => {
+    it('requires a browser origin list in production', () => {
       const problems = problemsFor({ ...production, CLIENT_URL: '', ALLOW_FIXED_OTP: 'true' });
-      expect(problems.some((p) => p.startsWith('CLIENT_URL'))).toBe(true);
+      expect(problems.some((p) => p.includes('ADMIN_URL, WEB_URL, or CLIENT_URL'))).toBe(true);
     });
   });
 
