@@ -40,7 +40,8 @@ export function createApp() {
 
   app.use(requestId);
   app.use(requestMetrics);
-  app.use(helmet());
+  // cross-origin: browser apps (admin/web) call this API from other Render origins.
+  app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
   app.use(cors(corsOptions()));
   app.use(express.json({ limit: env.jsonBodyLimit }));
 
