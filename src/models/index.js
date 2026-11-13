@@ -19,6 +19,7 @@ export { Notification } from './Notification.js';
 export { NotificationCampaign } from './NotificationCampaign.js';
 export { NotificationPreference } from './NotificationPreference.js';
 export { SubscriptionEntitlement } from './SubscriptionEntitlement.js';
+export { PaymentTransaction } from './PaymentTransaction.js';
 export { SupportTicket } from './SupportTicket.js';
 export { VerificationRequest } from './VerificationRequest.js';
 export { AuditLog } from './AuditLog.js';

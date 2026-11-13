@@ -203,7 +203,7 @@ describe('admin staff, CMS, fraud and related modules', () => {
       database: { ok: true },
       media: { processing: { queueConfigured: false } },
       calls: { configured: true },
-      payments: { configured: false },
+      payments: { configured: true, provider: 'demo' },
       jobs: { broker: 'in-process' },
       infrastructureCost: { configured: false },
       deployment: { environment: expect.any(String) },
@@ -216,8 +216,9 @@ describe('admin staff, CMS, fraud and related modules', () => {
     expect(calls.body.data.configured).toBe(true);
 
     const payments = await request(app).get('/api/v1/admin/payments/status').set(bearer(admin.token));
-    expect(payments.body.data.configured).toBe(false);
-    expect(payments.body.data.storeBillingConfigured).toBe(false);
+    expect(payments.body.data.configured).toBe(true);
+    expect(payments.body.data.storeBillingConfigured).toBe(true);
+    expect(payments.body.data.provider).toBe('demo');
   });
 });
 

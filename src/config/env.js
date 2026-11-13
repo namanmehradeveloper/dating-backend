@@ -266,6 +266,54 @@ function readAgoraSettings(source, problems) {
   };
 }
 
+const PAYMENT_PROVIDERS = ['demo', 'razorpay'];
+
+// Payment provider selection. Demo is for local/staging only unless DEMO_PAYMENTS_ENABLED=true.
+// Razorpay keys are optional until the adapter is implemented; presence alone marks it enabled.
+function readPaymentSettings(source, problems, isProduction, isTest) {
+  const provider = readText(source, 'PAYMENT_PROVIDER', isProduction ? 'razorpay' : 'demo');
+  if (!PAYMENT_PROVIDERS.includes(provider)) {
+    problems.push(`PAYMENT_PROVIDER must be one of ${PAYMENT_PROVIDERS.join(', ')}`);
+  }
+
+  const demoEnabledFlag = readBoolean(source, problems, 'DEMO_PAYMENTS_ENABLED', !isProduction);
+  if (isProduction && provider === 'demo' && !demoEnabledFlag) {
+    problems.push('PAYMENT_PROVIDER=demo is not allowed in production unless DEMO_PAYMENTS_ENABLED=true');
+  }
+  if (isProduction && demoEnabledFlag && provider === 'demo') {
+    // Deliberate production demo — allowed only with the explicit flag above.
+  }
+
+  const razorpayKeyId = readText(source, 'RAZORPAY_KEY_ID');
+  const razorpayKeySecret = readText(source, 'RAZORPAY_KEY_SECRET');
+  const razorpayWebhookSecret = readText(source, 'RAZORPAY_WEBHOOK_SECRET');
+  if (Boolean(razorpayKeyId) !== Boolean(razorpayKeySecret)) {
+    problems.push('RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET must both be set together');
+  }
+  const razorpayEnabled = Boolean(razorpayKeyId && razorpayKeySecret);
+  if (provider === 'razorpay' && !razorpayEnabled && !isTest) {
+    // Allowed at boot so the API can run before Razorpay is wired; calls return FEATURE_NOT_CONFIGURED.
+  }
+
+  const razorpayEnvironment = readText(source, 'RAZORPAY_ENVIRONMENT', isProduction ? 'live' : 'test');
+  if (!['test', 'live'].includes(razorpayEnvironment)) {
+    problems.push('RAZORPAY_ENVIRONMENT must be test or live');
+  }
+
+  return {
+    provider,
+    demoEnabled: demoEnabledFlag && (provider === 'demo' || !isProduction || isTest),
+    demoWebhookSecret: readText(source, 'DEMO_WEBHOOK_SECRET') || undefined,
+    razorpay: Object.freeze({
+      enabled: razorpayEnabled,
+      keyId: razorpayKeyId || undefined,
+      keySecret: razorpayKeySecret || undefined,
+      webhookSecret: razorpayWebhookSecret || undefined,
+      environment: razorpayEnvironment,
+    }),
+  };
+}
+
 // Validates a raw environment (normally process.env) and returns the frozen configuration object.
 // Every problem is collected first and thrown as one ConfigError, so a broken .env is fixed in one pass.
 export function loadEnv(source = process.env) {
@@ -276,11 +324,13 @@ export function loadEnv(source = process.env) {
   const port = readInteger(source, problems, 'PORT', 5050, 1, 65535);
 
   const cloudinary = readCloudinarySettings(source, problems, isProduction);
+  const isTest = nodeEnv === 'test';
+  const payments = readPaymentSettings(source, problems, isProduction, isTest);
 
   const config = {
     nodeEnv,
     isProduction,
-    isTest: nodeEnv === 'test',
+    isTest,
     isDevelopment: nodeEnv === 'development',
     port,
     host: readText(source, 'HOST', '0.0.0.0'),
@@ -297,6 +347,7 @@ export function loadEnv(source = process.env) {
     cloudinary: Object.freeze(cloudinary),
     agora: Object.freeze(readAgoraSettings(source, problems)),
     callRingTimeoutSeconds: readInteger(source, problems, 'CALL_RING_TIMEOUT_SECONDS', 30, 10, 120),
+    payments: Object.freeze(payments),
   };
 
   if (problems.length > 0) throw new ConfigError(problems);

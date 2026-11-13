@@ -27,6 +27,9 @@ export default defineConfig({
       UPLOADS_DIR: 'tests/.uploads',
       AGORA_APP_ID: '0123456789abcdef0123456789abcdef',
       AGORA_APP_CERTIFICATE: 'abcdef0123456789abcdef0123456789',
+      PAYMENT_PROVIDER: 'demo',
+      DEMO_PAYMENTS_ENABLED: 'true',
+      DEMO_WEBHOOK_SECRET: 'test_demo_webhook_secret',
     },
   },
 });

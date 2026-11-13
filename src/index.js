@@ -7,6 +7,7 @@ import { connectDB, disconnectDB, ensureIndexes } from './config/db.js';
 import './models/index.js';
 import { createApp, API_PREFIX } from './app.js';
 import { startAccountDeletionJob } from './jobs/accountDeletion.job.js';
+import { startSubscriptionExpiryJob } from './jobs/subscriptionExpiry.job.js';
 import { ensureDefaultInterests } from './services/interest.service.js';
 import { ensureUploadFolders } from './services/media.service.js';
 import { createSocketServer } from './socket/index.js';
@@ -40,7 +41,12 @@ async function startServer() {
   await ensureUploadFolders();
   await ensureDefaultInterests();
   startAccountDeletionJob();
+  const stopSubscriptionExpiryJob = startSubscriptionExpiryJob();
   const stopCallExpiryJob = startCallExpiryJob();
+
+  if (env.payments.provider === 'demo' && env.payments.demoEnabled) {
+    logger.warn('PAYMENT_PROVIDER=demo: checkout charges are simulated and marked DEMO. Not for live billing.');
+  }
 
   const server = http.createServer(createApp());
   const io = createSocketServer(server);
@@ -49,7 +55,10 @@ async function startServer() {
     logger.info(`Socket.IO listening on ws://127.0.0.1:${env.port}/v1`);
   });
 
-  listenForShutdown(server, io, stopCallExpiryJob);
+  listenForShutdown(server, io, () => {
+    stopCallExpiryJob();
+    stopSubscriptionExpiryJob();
+  });
 }
 
 // Closes the server and the database connection cleanly when the process is stopped (Ctrl+C or SIGTERM).

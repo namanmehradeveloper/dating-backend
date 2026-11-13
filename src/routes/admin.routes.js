@@ -83,10 +83,11 @@ router.patch('/verifications/:verificationId', adminController.reviewVerificatio
 
 // ---- Subscriptions (ADMIN only) ----
 
-// GET /api/v1/admin/subscriptions — list member subscriptions (ADMIN only).
+router.get('/subscriptions/stats', adminOnly, adminController.getSubscriptionStats);
+router.get('/subscriptions/analytics', adminOnly, adminController.getSubscriptionAnalytics);
+router.get('/subscriptions/plans', adminOnly, adminController.listSubscriptionPlans);
+router.patch('/subscriptions/plans/:productId', adminOnly, adminController.updateSubscriptionPlan);
 router.get('/subscriptions', adminOnly, adminController.listSubscriptions);
-
-// GET /api/v1/admin/subscriptions/:userId — one member's subscription (ADMIN only).
 router.get('/subscriptions/:userId', adminOnly, adminController.getSubscription);
 
 // ---- Support ----
@@ -245,5 +246,8 @@ router.get('/calls/stats', adminOnly, adminController.getCallsStats);
 router.get('/calls', adminOnly, adminController.listCalls);
 router.get('/calls/:callId', adminOnly, adminController.getCall);
 router.get('/payments/status', adminOnly, adminController.getPaymentsStatus);
+router.get('/payments/stats', adminOnly, adminController.getPaymentsStats);
+router.get('/payments', adminOnly, adminController.listPayments);
+router.get('/payments/:paymentId', adminOnly, adminController.getPayment);
 
 export default router;

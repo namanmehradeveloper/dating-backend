@@ -7,21 +7,22 @@ import { byUser, createRateLimiter, HOUR } from '../utils/rateLimit.js';
 
 const router = Router();
 
-const verifyLimit = createRateLimiter({ windowMs: HOUR, max: 20, keyFrom: byUser });
+const checkoutLimit = createRateLimiter({ windowMs: HOUR, max: 30, keyFrom: byUser });
+const verifyLimit = createRateLimiter({ windowMs: HOUR, max: 40, keyFrom: byUser });
 const restoreLimit = createRateLimiter({ windowMs: HOUR, max: 10, keyFrom: byUser });
+const cancelLimit = createRateLimiter({ windowMs: HOUR, max: 10, keyFrom: byUser });
+
+// Public provider webhooks (signature verified inside each adapter).
+router.post('/webhooks/:provider', subscriptionController.handleWebhook);
 
 router.use(requireAuth);
 
-// GET /api/v1/subscriptions/products — paywall products.
 router.get('/products', subscriptionController.getProducts);
-
-// GET /api/v1/subscriptions/entitlement — the member's current subscription tier.
 router.get('/entitlement', subscriptionController.getEntitlement);
-
-// POST /api/v1/subscriptions/verify — verify a store purchase; returns 501 until store verification is configured (20 per hour).
+router.get('/history', subscriptionController.getHistory);
+router.post('/checkout', checkoutLimit, subscriptionController.createCheckout);
 router.post('/verify', verifyLimit, subscriptionController.verifyPurchase);
-
-// POST /api/v1/subscriptions/restore — restore previous purchases; returns 501 until store verification is configured (10 per hour).
 router.post('/restore', restoreLimit, subscriptionController.restorePurchases);
+router.post('/cancel', cancelLimit, subscriptionController.cancelSubscription);
 
 export default router;

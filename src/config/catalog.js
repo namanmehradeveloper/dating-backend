@@ -68,7 +68,7 @@ export const FAQS = [
   },
 ];
 
-// Display information only; the store purchase sheet shows the real price.
+// Paywall products. amountMinor is the canonical charge in the smallest currency unit (paise).
 export const SUBSCRIPTION_PRODUCTS = [
   {
     id: 'dc_plus_monthly',
@@ -77,6 +77,8 @@ export const SUBSCRIPTION_PRODUCTS = [
     description: 'Unlimited likes, see who likes you and undo.',
     priceLabel: '₹499',
     period: 'MONTHLY',
+    amountMinor: 49900,
+    currency: 'INR',
   },
   {
     id: 'dc_plus_yearly',
@@ -85,8 +87,19 @@ export const SUBSCRIPTION_PRODUCTS = [
     description: 'Everything in Plus for a whole year.',
     priceLabel: '₹3,999',
     period: 'YEARLY',
+    amountMinor: 399900,
+    currency: 'INR',
   },
 ];
+
+export function findSubscriptionProduct(productId) {
+  return SUBSCRIPTION_PRODUCTS.find((product) => product.id === productId) ?? null;
+}
+
+export function periodDurationMs(period) {
+  if (period === 'YEARLY') return 365 * 24 * 60 * 60 * 1000;
+  return 30 * 24 * 60 * 60 * 1000;
+}
 
 // Settings admins may change, with their default values and allowed ranges.
 export const EDITABLE_SETTINGS = {

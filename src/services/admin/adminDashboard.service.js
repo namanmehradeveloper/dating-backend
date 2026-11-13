@@ -10,6 +10,7 @@ import { User } from '../../models/User.js';
 import { VerificationRequest } from '../../models/VerificationRequest.js';
 import { getOnlineUserCount } from '../realtime.service.js';
 import { getSystemInfo } from '../settings.service.js';
+import { sumRealRevenueMinor } from './adminPayments.service.js';
 import { presentReportSummaries } from './adminReports.service.js';
 import { loadUserCards, maskEmail } from './adminPresenter.js';
 
@@ -303,6 +304,7 @@ export async function getDashboard(input = {}) {
     recentMatches,
     recentTickets,
     followUp,
+    realRevenue,
   ] = await Promise.all([
     User.countDocuments(members),
     User.countDocuments({ ...members, createdAt: { $gte: today } }),
@@ -342,6 +344,7 @@ export async function getDashboard(input = {}) {
     loadRecentMatches(),
     loadRecentTickets(),
     loadFollowUp(),
+    sumRealRevenueMinor({ since: start }),
   ]);
 
   const signupsByDay = trends.map((day) => ({ date: day.date, count: day.signups }));
@@ -379,11 +382,14 @@ export async function getDashboard(input = {}) {
     subscriptions: { activePremium },
     revenue: {
       billingConfigured: system.storeBillingConfigured === true,
-      currency: 'INR',
-      amount: null,
+      currency: realRevenue._id || 'INR',
+      amountMinor: realRevenue.amountMinor || 0,
+      amount: (realRevenue.amountMinor || 0) / 100,
+      paymentCount: realRevenue.count || 0,
       activePremium,
+      excludesDemo: true,
       note: system.storeBillingConfigured
-        ? null
+        ? 'Real (non-demo) succeeded payments only. Demo transactions never count as revenue.'
         : 'Store billing is not configured. There is no payment ledger to sum revenue from.',
     },
     signupsByDay,

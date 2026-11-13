@@ -197,8 +197,12 @@ describe('Socket.IO /v1', () => {
     const member = await createMember();
     const client = await connect(member.token);
     const updated = nextEvent(client, 'entitlement:updated');
-    await applyVerifiedEntitlement(member.id, { tier: 'PLUS', isActive: true, expiresAt: new Date(Date.now() + 86400000) });
-    expect(await updated).toEqual({ tier: 'PLUS', isActive: true });
+    await applyVerifiedEntitlement(
+      member.id,
+      { tier: 'PLUS', isActive: true, expiresAt: new Date(Date.now() + 86400000) },
+      { provider: 'demo', environment: 'demo' },
+    );
+    expect(await updated).toEqual({ tier: 'PLUS', isActive: true, provider: 'demo', environment: 'demo' });
   });
 
   it('emits session:expired and disconnects when the access token expires', async () => {

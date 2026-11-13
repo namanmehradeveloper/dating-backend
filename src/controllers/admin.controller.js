@@ -155,13 +155,29 @@ export async function reviewVerification(req, res) {
 
 // ---- Subscriptions (ADMIN) ----
 
-// GET /admin/subscriptions
+export async function getSubscriptionStats(req, res) {
+  return ApiResponse.ok(res, await adminSubscriptions.getSubscriptionStats());
+}
+
+export async function getSubscriptionAnalytics(req, res) {
+  const { days } = validators.validateDaysQuery(req.query);
+  return ApiResponse.ok(res, await adminSubscriptions.getSubscriptionAnalytics({ days }));
+}
+
+export async function listSubscriptionPlans(req, res) {
+  return ApiResponse.ok(res, await adminSubscriptions.listSubscriptionPlans());
+}
+
+export async function updateSubscriptionPlan(req, res) {
+  const changes = validators.validateSubscriptionPlanUpdate(req.body);
+  return ApiResponse.ok(res, await adminSubscriptions.updateSubscriptionPlan(req.user, req.params.productId, changes));
+}
+
 export async function listSubscriptions(req, res) {
   const filters = validators.validateSubscriptionListQuery(req.query);
   return ApiResponse.ok(res, await adminSubscriptions.listSubscriptions(filters, parsePagination(req.query)));
 }
 
-// GET /admin/subscriptions/:userId
 export async function getSubscription(req, res) {
   return ApiResponse.ok(res, await adminSubscriptions.getSubscription(req.params.userId));
 }
@@ -646,4 +662,18 @@ export async function getCall(req, res) {
 
 export async function getPaymentsStatus(req, res) {
   return ApiResponse.ok(res, adminPayments.getPaymentsStatus());
+}
+
+export async function getPaymentsStats(req, res) {
+  const { days } = validators.validateDaysQuery(req.query);
+  return ApiResponse.ok(res, await adminPayments.getPaymentsStats({ days }));
+}
+
+export async function listPayments(req, res) {
+  const filters = validators.validatePaymentsListQuery(req.query);
+  return ApiResponse.ok(res, await adminPayments.listPayments(filters, parsePagination(req.query)));
+}
+
+export async function getPayment(req, res) {
+  return ApiResponse.ok(res, await adminPayments.getPayment(req.params.paymentId));
 }

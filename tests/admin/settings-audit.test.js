@@ -30,7 +30,7 @@ describe('admin settings', () => {
       'blockAbuseThresholdPerDay',
       'verificationDailyLimit',
     ]);
-    expect(res.body.data.system).toMatchObject({ otpMode: 'fixed', pushNotificationsConfigured: false, storeBillingConfigured: false });
+    expect(res.body.data.system).toMatchObject({ otpMode: 'fixed', pushNotificationsConfigured: false, storeBillingConfigured: true, paymentProvider: 'demo' });
 
     const body = JSON.stringify(res.body);
     for (const secret of [env.jwtAccessSecret, env.jwtRefreshSecret, env.mongodbUri, env.fixedOtp]) {
@@ -108,7 +108,7 @@ describe('admin dashboard', () => {
       messages: { sentToday: 0 },
       support: { openTickets: 0 },
       subscriptions: { activePremium: 0 },
-      revenue: { billingConfigured: false, amount: null, activePremium: 0 },
+      revenue: { billingConfigured: true, amount: 0, amountMinor: 0, excludesDemo: true, activePremium: 0 },
     });
     expect(res.body.data.signupsByDay).toHaveLength(7);
     expect(res.body.data.signupsByDay[6]).toEqual({ date: new Date().toISOString().slice(0, 10), count: 3 });

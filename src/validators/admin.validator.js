@@ -301,14 +301,68 @@ export function validateAuditQuery(query) {
   return filters;
 }
 
-// GET /admin/subscriptions?tier=&isActive=true|false
+// GET /admin/subscriptions?tier=&isActive=&provider=&lifecycle=&environment=
 export function validateSubscriptionListQuery(query) {
   const details = [];
   const q = readTextFilter(details, query, 'q', 100);
   const tier = readEnumFilter(details, query, 'tier', ['FREE', 'PLUS']);
   const isActive = readEnumFilter(details, query, 'isActive', ['true', 'false']);
+  const provider = readEnumFilter(details, query, 'provider', ['demo', 'razorpay', 'apple', 'google']);
+  const lifecycle = readEnumFilter(details, query, 'lifecycle', ['ACTIVE', 'EXPIRED', 'CANCELLED', 'FREE', 'INACTIVE']);
+  const environment = readEnumFilter(details, query, 'environment', ['demo', 'test', 'live']);
   throwIfInvalid(details);
-  return { q, tier, isActive: isActive === undefined ? undefined : isActive === 'true' };
+  return {
+    q,
+    tier,
+    isActive: isActive === undefined ? undefined : isActive === 'true',
+    provider,
+    lifecycle,
+    environment,
+  };
+}
+
+// GET /admin/payments?status=&kind=demo|real&provider=&productId=&q=
+export function validatePaymentsListQuery(query) {
+  const details = [];
+  const filters = {
+    status: readEnumFilter(details, query, 'status', ['PENDING', 'SUCCEEDED', 'FAILED', 'CANCELLED', 'REFUNDED']),
+    kind: readEnumFilter(details, query, 'kind', ['demo', 'real']),
+    provider: readEnumFilter(details, query, 'provider', ['demo', 'razorpay']),
+    productId: readEnumFilter(details, query, 'productId', ['dc_plus_monthly', 'dc_plus_yearly']),
+    q: readTextFilter(details, query, 'q', 120),
+  };
+  throwIfInvalid(details);
+  return filters;
+}
+
+// PATCH /admin/subscriptions/plans/:productId
+export function validateSubscriptionPlanUpdate(body) {
+  requireObjectBody(body);
+  const details = [];
+  const changes = {};
+  if (body.reset === true) {
+    throwIfInvalid(details);
+    return { reset: true };
+  }
+  if (body.title !== undefined) {
+    changes.title = checkText(details, 'title', body.title, { min: 1, max: 80 });
+  }
+  if (body.description !== undefined) {
+    changes.description = checkText(details, 'description', body.description, { min: 1, max: 240 });
+  }
+  if (body.priceLabel !== undefined) {
+    changes.priceLabel = checkText(details, 'priceLabel', body.priceLabel, { min: 1, max: 40 });
+  }
+  if (body.amountMinor !== undefined) {
+    if (!Number.isInteger(body.amountMinor) || body.amountMinor < 100 || body.amountMinor > 10_000_000) {
+      details.push({ field: 'amountMinor', reason: 'RANGE_100_10000000' });
+    } else {
+      changes.amountMinor = body.amountMinor;
+    }
+  }
+  if (Object.keys(changes).length === 0) details.push({ field: 'body', reason: 'EMPTY' });
+  throwIfInvalid(details);
+  return changes;
 }
 
 // PATCH /admin/settings: any editable setting, each a whole number within its allowed range.

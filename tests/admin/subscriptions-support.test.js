@@ -26,14 +26,14 @@ describe('admin subscriptions', () => {
     expect((await request(app).get('/api/v1/admin/subscriptions?isActive=false').set(bearer(admin.token))).body.data.items).toEqual([]);
   });
 
-  it('shows one member, including FREE members and the unconfigured store state', async () => {
+  it('shows one member, including FREE members and billing provider status', async () => {
     const admin = await createStaff('ADMIN');
     const member = await createMember();
     const res = await request(app).get(`/api/v1/admin/subscriptions/${member.id}`).set(bearer(admin.token));
     expect(res.body.data).toMatchObject({
       user: { id: member.id },
       entitlement: { tier: 'FREE', isActive: false },
-      storeVerification: { configured: false, status: 'FEATURE_NOT_CONFIGURED' },
+      storeVerification: { configured: true, status: 'CONFIGURED', provider: 'demo', environment: 'demo' },
     });
   });
 });

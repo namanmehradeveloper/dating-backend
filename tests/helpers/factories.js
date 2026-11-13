@@ -61,7 +61,7 @@ export async function createStaff(role = 'ADMIN', overrides = {}) {
   return { user: account, token: issueAccessToken(account), id: account._id };
 }
 
-// Gives a member an active PLUS entitlement directly in the database (as store verification would).
+// Gives a member an active PLUS entitlement directly in the database (as verification would).
 export async function grantPremium(userId) {
   await SubscriptionEntitlement.create({
     userId,
@@ -69,6 +69,8 @@ export async function grantPremium(userId) {
     isActive: true,
     productId: 'dc_plus_monthly',
     platform: 'ANDROID',
+    provider: 'demo',
+    environment: 'demo',
     expiresAt: new Date(Date.now() + 30 * 86400000),
     willRenew: true,
     originalTransactionId: `txn_${userId}`,

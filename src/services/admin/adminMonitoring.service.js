@@ -138,7 +138,7 @@ export async function getSystemStatus() {
   const payments = {
     ...getPaymentsStatus(),
     webhookFailures: null,
-    note: 'No payment webhook receiver exists in this API, so failure counts cannot be reported.',
+    note: 'Webhook failure counts are provider-specific and are not aggregated yet.',
   };
   const jobs = listJobs();
   const socketsConnected = getConnectedSocketCount();

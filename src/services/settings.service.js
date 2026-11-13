@@ -38,12 +38,17 @@ export async function saveSettings(changes, updatedBy) {
 
 // Read-only facts shown on the admin settings page. None of them is secret.
 export function getSystemInfo() {
+  const paymentsConfigured =
+    (env.payments.provider === 'demo' && env.payments.demoEnabled) ||
+    (env.payments.provider === 'razorpay' && env.payments.razorpay.enabled);
+
   return {
     environment: env.nodeEnv,
     currentTermsVersion: env.currentTermsVersion,
     otpMode: env.otpMode,
     pushNotificationsConfigured: false,
-    storeBillingConfigured: false,
+    storeBillingConfigured: paymentsConfigured,
+    paymentProvider: env.payments.provider,
     socialSignInConfigured: false,
   };
 }
