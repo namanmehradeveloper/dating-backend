@@ -234,4 +234,62 @@ describe('Socket.IO /v1', () => {
     expect(await laptopExpired).toEqual({ code: 'UNAUTHENTICATED' });
     await expect(connect(member.token)).rejects.toMatchObject({ data: { code: 'UNAUTHENTICATED' } });
   });
+
+  it('broadcasts presence to conversation partners across connect, multi-device and disconnect', async () => {
+    const alex = await createMember();
+    const avery = await createMember();
+    await matchMembers(app, alex, avery);
+    const averySocket = await connect(avery.token);
+
+    const onlineUpdate = nextEvent(averySocket, 'presence:update');
+    const userOnline = nextEvent(averySocket, 'user:online');
+    const alexPhone = await connect(alex.token);
+    expect(await onlineUpdate).toEqual({ userId: alex.id, isOnline: true, lastSeenAt: null });
+    expect(await userOnline).toEqual({ userId: alex.id, lastSeenAt: null });
+
+    const listWhileOnline = await request(app).get('/api/v1/conversations').set(bearer(avery.token));
+    expect(listWhileOnline.body.data.items[0].otherUser).toMatchObject({ id: alex.id, isOnline: true, lastSeenAt: null });
+
+    // Second device must not emit another online transition.
+    const noSecondOnline = receivesEvent(averySocket, 'user:online', 250);
+    const alexLaptop = await connect(alex.token);
+    expect(await noSecondOnline).toBe(false);
+
+    // Closing one device keeps the member online.
+    const stillOnline = receivesEvent(averySocket, 'user:offline', 250);
+    alexPhone.disconnect();
+    expect(await stillOnline).toBe(false);
+    expect((await request(app).get('/api/v1/conversations').set(bearer(avery.token))).body.data.items[0].otherUser.isOnline).toBe(true);
+
+    const offlineUpdate = nextEvent(averySocket, 'presence:update');
+    const userOffline = nextEvent(averySocket, 'user:offline');
+    alexLaptop.disconnect();
+    const offlinePayload = await offlineUpdate;
+    expect(offlinePayload).toMatchObject({ userId: alex.id, isOnline: false });
+    expect(offlinePayload.lastSeenAt).toEqual(expect.any(String));
+    expect(await userOffline).toEqual({ userId: alex.id, lastSeenAt: offlinePayload.lastSeenAt });
+
+    const listWhileOffline = await request(app).get('/api/v1/conversations').set(bearer(avery.token));
+    expect(listWhileOffline.body.data.items[0].otherUser).toMatchObject({
+      id: alex.id,
+      isOnline: false,
+      lastSeenAt: offlinePayload.lastSeenAt,
+    });
+  });
+
+  it('hides online status when the member disables showOnlineStatus', async () => {
+    const alex = await createMember();
+    const avery = await createMember();
+    await matchMembers(app, alex, avery);
+    const { Profile } = await import('../../src/models/Profile.js');
+    await Profile.updateOne({ userId: alex.id }, { $set: { 'privacy.showOnlineStatus': false } });
+
+    const averySocket = await connect(avery.token);
+    const hiddenOnline = nextEvent(averySocket, 'presence:update');
+    await connect(alex.token);
+    expect(await hiddenOnline).toEqual({ userId: alex.id, isOnline: false, lastSeenAt: null });
+
+    const list = await request(app).get('/api/v1/conversations').set(bearer(avery.token));
+    expect(list.body.data.items[0].otherUser).toMatchObject({ id: alex.id, isOnline: false, lastSeenAt: null });
+  });
 });

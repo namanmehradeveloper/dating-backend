@@ -14,6 +14,7 @@ import { isVisibleMember } from './accountStatus.service.js';
 import { getBlockedUserIds, hasBlocked, isBlockedEitherWay } from './block.service.js';
 import { notifyUser } from './notification.service.js';
 import { toPublicProfiles } from './profilePresenter.js';
+import { allowsOnlineStatus, resolveVisiblePresence } from './presence.service.js';
 import { emitToUser } from './realtime.service.js';
 
 // Returns the other participant of a two-person conversation.
@@ -105,6 +106,7 @@ async function presentConversations(conversations, viewerId) {
     Profile.find({ userId: { $in: otherIds } }).lean(),
   ]);
   const usersById = new Map(users.map((user) => [user._id, user]));
+  const profilesByUserId = new Map(profiles.map((profile) => [profile.userId, profile]));
   const publicProfiles = await toPublicProfiles(profiles, usersById);
   const profileById = new Map(publicProfiles.map((profile) => [profile.id, profile]));
 
@@ -121,10 +123,20 @@ async function presentConversations(conversations, viewerId) {
       unsentAt: null,
       hiddenFor: { $ne: viewerId },
     });
+    const otherProfile = profilesByUserId.get(otherId);
+    const presence = resolveVisiblePresence({
+      userId: otherId,
+      user: usersById.get(otherId),
+      showOnlineStatus: allowsOnlineStatus(otherProfile),
+    });
     summaries.push({
       id: conversation._id,
       matchId: conversation.matchId,
-      otherUser: profileById.get(otherId),
+      otherUser: {
+        ...profileById.get(otherId),
+        isOnline: presence.isOnline,
+        lastSeenAt: presence.lastSeenAt,
+      },
       lastMessage: lastMessage ? presentMessage(lastMessage) : null,
       unreadCount,
     });

@@ -6,10 +6,12 @@ import { Server } from 'socket.io';
 import { env } from '../config/env.js';
 import { authenticateAccessToken } from '../middlewares/auth.middleware.js';
 import { assertCanSendTyping, markConversationRead, otherParticipant } from '../services/chat.service.js';
+import { handleUserCameOnline, handleUserWentOffline } from '../services/presence.service.js';
 import {
   attachRealtimeNamespace,
   detachRealtimeNamespace,
   emitToUser,
+  setPresenceTransitionHandler,
   trackUserOffline,
   trackUserOnline,
   userRoom,
@@ -34,6 +36,10 @@ export function createSocketServer(httpServer) {
   namespace.use(authenticateSocket);
   namespace.on('connection', handleConnection);
   attachRealtimeNamespace(namespace);
+  setPresenceTransitionHandler((userId, change) => {
+    if (change.isOnline) void handleUserCameOnline(userId);
+    else void handleUserWentOffline(userId, change.lastSeenAt);
+  });
 
   io.on('close', detachRealtimeNamespace);
   return io;

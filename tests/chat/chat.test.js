@@ -110,7 +110,7 @@ describe('chat REST', () => {
       {
         id: match.conversationId,
         matchId: match.id,
-        otherUser: expect.objectContaining({ id: alex.id, displayName: 'Alex' }),
+        otherUser: expect.objectContaining({ id: alex.id, displayName: 'Alex', isOnline: false }),
         lastMessage: expect.objectContaining({ text: 'Second', senderId: alex.id }),
         unreadCount: 2,
       },
