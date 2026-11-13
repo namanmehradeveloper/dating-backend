@@ -108,6 +108,8 @@ describe('call signalling API', () => {
     expect(accepted.body.data.credentials.token).not.toBe(started.body.data.credentials.token);
     expect(await acceptedEvent).toEqual({ call: accepted.body.data.call });
 
+    const callerMessages = await connect(caller.token);
+    const callMessageEvent = nextEvent(callerMessages, 'message:new');
     const ended = await request(app)
       .post(`/api/v1/calls/${started.body.data.call.id}/end`)
       .set(bearer(caller.token));
@@ -117,6 +119,26 @@ describe('call signalling API', () => {
     const history = await request(app).get('/api/v1/calls').set(bearer(caller.token));
     expect(history.body.data.items).toHaveLength(1);
     expect(history.body.data.items[0].status).toBe('ENDED');
+
+    const callMessage = await callMessageEvent;
+    expect(callMessage.message).toMatchObject({
+      conversationId: match.conversationId,
+      senderId: caller.id,
+      text: '',
+      attachment: null,
+      call: {
+        callId: started.body.data.call.id,
+        type: 'VIDEO',
+        status: 'ENDED',
+        durationSeconds: expect.any(Number),
+      },
+    });
+
+    const thread = await request(app)
+      .get(`/api/v1/conversations/${match.conversationId}/messages`)
+      .set(bearer(callee.token));
+    expect(thread.status).toBe(200);
+    expect(thread.body.data.items.some((item) => item.call?.callId === started.body.data.call.id)).toBe(true);
   });
 
   it('handles rejection, cancellation, busy participants and missed calls', async () => {
@@ -149,6 +171,19 @@ describe('call signalling API', () => {
     const missed = await request(app).get('/api/v1/calls/active').set(bearer(caller.token));
     expect(missed.body.data.call).toBeNull();
     expect((await Call.findById(active.body.data.call.id)).status).toBe('MISSED');
+
+    const firstThread = await request(app)
+      .get(`/api/v1/conversations/${firstMatch.conversationId}/messages`)
+      .set(bearer(caller.token));
+    const callStatuses = firstThread.body.data.items.map((item) => item.call?.status).filter(Boolean);
+    expect(callStatuses).toEqual(expect.arrayContaining(['REJECTED', 'CANCELLED', 'MISSED']));
+
+    const secondThread = await request(app)
+      .get(`/api/v1/conversations/${secondMatch.conversationId}/messages`)
+      .set(bearer(third.token));
+    const busyLogs = secondThread.body.data.items.filter((item) => item.call?.status === 'BUSY');
+    expect(busyLogs).toHaveLength(2);
+    expect(busyLogs[0].call.callId).not.toBe(busyLogs[1].call.callId);
   });
 
   it('does not disclose calls to non-participants or allow outsiders to place calls', async () => {

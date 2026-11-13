@@ -3,10 +3,19 @@ import mongoose from 'mongoose';
 import agoraToken from 'agora-token';
 import { env } from '../config/env.js';
 import { Call, ACTIVE_CALL_STATUSES } from '../models/Call.js';
-import { getConversation } from './chat.service.js';
+import { getConversation, recordCallMessage } from './chat.service.js';
 import { emitToUser } from './realtime.service.js';
 import { ApiError } from '../utils/ApiError.js';
 import { logger } from '../utils/logger.js';
+
+async function appendCallToChat(call) {
+  if (!call) return;
+  try {
+    await recordCallMessage(call);
+  } catch (error) {
+    logger.error('Failed to record call chat message', { callId: String(call._id), error: error.stack });
+  }
+}
 
 const TOKEN_TTL_SECONDS = 60 * 60;
 const { RtcRole, RtcTokenBuilder } = agoraToken;
@@ -89,6 +98,7 @@ async function expireCall(call) {
     const event = { call: callDto(expired) };
     emitToUser(expired.callerId, 'call:missed', event);
     emitToUser(expired.calleeId, 'call:missed', event);
+    await appendCallToChat(expired);
   }
   return expired;
 }
@@ -111,6 +121,7 @@ async function rejectExpiredRingingCall(call) {
 async function createBusyCall({ conversationId, callerId, calleeId, type }) {
   const call = await createCallRecord({ conversationId, callerId, calleeId, type, status: 'BUSY' });
   emitToUser(callerId, 'call:busy', { call: callDto(call) });
+  await appendCallToChat(call);
   return { call: callDto(call), credentials: null };
 }
 
@@ -189,6 +200,7 @@ export async function rejectCall(userId, callId) {
   );
   if (!call) throw ApiError.conflict('This call is no longer ringing.');
   emitToUser(call.callerId, 'call:rejected', { call: callDto(call) });
+  await appendCallToChat(call);
   return callDto(call);
 }
 
@@ -206,6 +218,7 @@ export async function cancelCall(userId, callId) {
   );
   if (!call) throw ApiError.conflict('This call can no longer be cancelled.');
   emitToUser(call.calleeId, 'call:cancelled', { call: callDto(call) });
+  await appendCallToChat(call);
   return callDto(call);
 }
 
@@ -223,6 +236,7 @@ export async function endCall(userId, callId) {
   const event = { call: callDto(call) };
   emitToUser(call.callerId, 'call:ended', event);
   emitToUser(call.calleeId, 'call:ended', event);
+  await appendCallToChat(call);
   return callDto(call);
 }
 

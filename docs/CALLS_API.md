@@ -298,6 +298,19 @@ Connect to namespace `/v1` with `auth.token = accessToken`.
 
 Events carry **call metadata only** — never Agora tokens. Tokens come only from REST (`start`, `accept`, `active`).
 
+When a call reaches a terminal status (`ENDED`, `MISSED`, `REJECTED`, `CANCELLED`, `BUSY`), the server also inserts a chat message in that conversation and emits the usual `message:new` event. The message has empty `text`, `attachment: null`, and a `call` object:
+
+```json
+{
+  "callId": "665f1c2e9b1d4a0012345678",
+  "type": "VIDEO",
+  "status": "ENDED",
+  "durationSeconds": 42
+}
+```
+
+`senderId` is always the caller. `durationSeconds` is set only for `ENDED` calls. Render these like WhatsApp call rows in the thread; conversation list previews should prefer `call` over empty text.
+
 ---
 
 ## Recommended Flutter flows

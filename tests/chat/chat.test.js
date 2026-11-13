@@ -59,6 +59,7 @@ describe('chat REST', () => {
       senderId: alex.id,
       text: 'Hi Avery!',
       attachment: null,
+      call: null,
       sentAt: expect.any(String),
       status: 'SENT',
       clientMessageId,
@@ -242,6 +243,7 @@ describe('chat REST', () => {
       id: message.id,
       text: '',
       attachment: null,
+      call: null,
       status: 'UNSENT',
     });
     expect(unsent.body.data.unsentAt).toEqual(expect.any(String));

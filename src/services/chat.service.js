@@ -4,7 +4,7 @@
 
 import { Conversation } from '../models/Conversation.js';
 import { Media } from '../models/Media.js';
-import { Message } from '../models/Message.js';
+import { CALL_MESSAGE_STATUSES, Message } from '../models/Message.js';
 import { Profile } from '../models/Profile.js';
 import { User } from '../models/User.js';
 import { ApiError } from '../utils/ApiError.js';
@@ -34,6 +34,17 @@ export function presentAttachment(attachment) {
   };
 }
 
+// Shapes a finished call log embedded on a chat message.
+export function presentCall(call) {
+  if (!call?.callId) return null;
+  return {
+    callId: call.callId,
+    type: call.type,
+    status: call.status,
+    durationSeconds: call.durationSeconds ?? null,
+  };
+}
+
 // Shapes a message for the API. Status is UNSENT after delete-for-everyone, READ once the
 // recipient has read it, otherwise SENT.
 export function presentMessage(message) {
@@ -44,6 +55,7 @@ export function presentMessage(message) {
     senderId: message.senderId,
     text: unsent ? '' : (message.text ?? ''),
     attachment: unsent ? null : presentAttachment(message.attachment),
+    call: unsent ? null : presentCall(message.call),
     sentAt: message.sentAt,
     status: unsent ? 'UNSENT' : message.readAt ? 'READ' : 'SENT',
     clientMessageId: message.clientMessageId ?? null,
@@ -201,17 +213,80 @@ async function loadChatAttachment(senderId, mediaId) {
 }
 
 // Saves a message once per clientMessageId; a retried send returns the message already saved.
-async function saveMessage(conversationId, senderId, { text, attachment, clientMessageId }) {
+async function saveMessage(conversationId, senderId, { text, attachment, clientMessageId, call = null }) {
   const existing = await Message.findOne({ senderId, clientMessageId });
   if (existing) return { message: existing, isNew: false };
 
   try {
-    const message = await Message.create({ conversationId, senderId, text, attachment, clientMessageId, sentAt: new Date() });
+    const message = await Message.create({
+      conversationId,
+      senderId,
+      text,
+      attachment,
+      call,
+      clientMessageId,
+      sentAt: new Date(),
+    });
     return { message, isNew: true };
   } catch (error) {
     if (error?.code !== 11000) throw error;
-    return { message: await Message.findOne({ senderId, clientMessageId }), isNew: false };
+    const byClientId = await Message.findOne({ senderId, clientMessageId });
+    if (byClientId) return { message: byClientId, isNew: false };
+    if (call?.callId) {
+      const byCallId = await Message.findOne({ 'call.callId': call.callId });
+      if (byCallId) return { message: byCallId, isNew: false };
+    }
+    throw error;
   }
+}
+
+// Writes a conversation call-log message after a call reaches a terminal status, then emits message:new.
+export async function recordCallMessage(callDoc) {
+  if (!callDoc || !CALL_MESSAGE_STATUSES.includes(callDoc.status)) return null;
+
+  const callId = String(callDoc._id);
+  const conversationId = callDoc.conversationId;
+  const callerId = callDoc.callerId;
+  let durationSeconds = null;
+  if (callDoc.status === 'ENDED' && callDoc.acceptedAt && callDoc.endedAt) {
+    durationSeconds = Math.max(0, Math.round((new Date(callDoc.endedAt) - new Date(callDoc.acceptedAt)) / 1000));
+  }
+
+  const call = {
+    callId,
+    type: callDoc.type,
+    status: callDoc.status,
+    durationSeconds,
+  };
+
+  const { message, isNew } = await saveMessage(conversationId, callerId, {
+    text: '',
+    attachment: null,
+    clientMessageId: `call:${callId}`,
+    call,
+  });
+
+  if (message.conversationId !== conversationId) {
+    throw ApiError.conflict('This clientMessageId was already used in another conversation.');
+  }
+
+  const presented = presentMessage(message);
+  if (isNew) {
+    const conversation = await Conversation.findById(conversationId);
+    if (conversation) {
+      await Conversation.updateOne(
+        { _id: conversationId },
+        {
+          $set: { lastMessageId: message._id, lastActivityAt: message.sentAt },
+          $pull: { hiddenFor: { $in: conversation.participantIds } },
+        },
+      );
+      for (const participantId of conversation.participantIds) {
+        emitToUser(participantId, 'message:new', { message: presented });
+      }
+    }
+  }
+  return presented;
 }
 
 // Sends a message (text, an uploaded chat photo, or both): checks membership, the active match and
@@ -284,6 +359,7 @@ export async function unsendMessage(userId, messageId) {
   if (!message.unsentAt) {
     message.text = '';
     message.attachment = null;
+    message.call = null;
     message.unsentAt = new Date();
     message.unsentBy = userId;
     await message.save();
