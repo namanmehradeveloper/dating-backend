@@ -1,6 +1,6 @@
-// A chat message: text, a photo, a call log, or a mix of text/photo. REST is the source of truth;
-// Socket.IO only announces saved messages. The unique senderId + clientMessageId index makes retried
-// sends return the same message. Call logs use clientMessageId `call:<callId>` for idempotency.
+// A chat message: text, a photo, a call log, gift, paid emoji, or a mix of text/photo. REST is the
+// source of truth; Socket.IO only announces saved messages. The unique senderId + clientMessageId
+// index makes retried sends return the same message. Call logs use clientMessageId `call:<callId>`.
 
 import mongoose from 'mongoose';
 import { prefixedIdField } from '../utils/ids.js';
@@ -30,6 +30,28 @@ const callSchema = new mongoose.Schema(
   { _id: false },
 );
 
+// Snapshot of a virtual gift so catalog edits do not rewrite chat history.
+const giftSchema = new mongoose.Schema(
+  {
+    itemId: { type: String, required: true },
+    title: { type: String, required: true },
+    emoji: { type: String, default: '' },
+    imageUrl: { type: String, default: '' },
+    priceCoins: { type: Number, default: 0 },
+  },
+  { _id: false },
+);
+
+// Snapshot of a paid emoji send (pack must be owned at send time).
+const paidEmojiSchema = new mongoose.Schema(
+  {
+    packId: { type: String, required: true },
+    packTitle: { type: String, required: true },
+    emoji: { type: String, required: true },
+  },
+  { _id: false },
+);
+
 const messageSchema = new mongoose.Schema(
   {
     _id: prefixedIdField('msg'),
@@ -38,6 +60,8 @@ const messageSchema = new mongoose.Schema(
     text: { type: String, default: '' },
     attachment: { type: attachmentSchema, default: null },
     call: { type: callSchema, default: null },
+    gift: { type: giftSchema, default: null },
+    paidEmoji: { type: paidEmojiSchema, default: null },
     clientMessageId: String,
     sentAt: { type: Date, default: Date.now },
     readAt: Date,

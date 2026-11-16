@@ -1167,3 +1167,28 @@ export function validateExperimentUpdate(body) {
   requireSomeField(changes);
   return changes;
 }
+
+// GET /admin/store/items?kind=&isActive=&q=
+export function validateStoreItemListQuery(query) {
+  const details = [];
+  const isActive = readEnumFilter(details, query, 'isActive', ['true', 'false']);
+  const filters = {
+    kind: readEnumFilter(details, query, 'kind', ['COIN_PACK', 'EMOJI_PACK', 'GIFT']),
+    isActive: isActive === undefined ? undefined : isActive === 'true',
+    q: readTextFilter(details, query, 'q', 100),
+  };
+  throwIfInvalid(details);
+  return filters;
+}
+
+// GET /admin/store/purchases?status=&userId=&q=
+export function validateStorePurchaseListQuery(query) {
+  const details = [];
+  const filters = {
+    status: readEnumFilter(details, query, 'status', ['PENDING', 'SUCCEEDED', 'FAILED', 'CANCELLED']),
+    userId: readTextFilter(details, query, 'userId', 64),
+    q: readTextFilter(details, query, 'q', 100),
+  };
+  throwIfInvalid(details);
+  return filters;
+}

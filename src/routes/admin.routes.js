@@ -250,4 +250,13 @@ router.get('/payments/stats', adminOnly, adminController.getPaymentsStats);
 router.get('/payments', adminOnly, adminController.listPayments);
 router.get('/payments/:paymentId', adminOnly, adminController.getPayment);
 
+// ---- Virtual store (ADMIN only) ----
+
+router.get('/store/items', adminOnly, adminController.listStoreItems);
+router.post('/store/items', adminOnly, adminController.createStoreItem);
+router.patch('/store/items/:itemId', adminOnly, adminController.updateStoreItem);
+router.get('/store/purchases', adminOnly, adminController.listStorePurchases);
+router.get('/store/wallets/:userId', adminOnly, adminController.getStoreWallet);
+router.post('/store/wallets/:userId/adjust', adminOnly, adminController.adjustStoreWallet);
+
 export default router;

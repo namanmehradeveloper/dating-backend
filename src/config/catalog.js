@@ -96,6 +96,121 @@ export function findSubscriptionProduct(productId) {
   return SUBSCRIPTION_PRODUCTS.find((product) => product.id === productId) ?? null;
 }
 
+// Virtual goods: coin packs (money → coins), emoji packs, and gifts sent in chat.
+export const DEFAULT_STORE_ITEMS = [
+  {
+    _id: 'coins_100',
+    kind: 'COIN_PACK',
+    title: '100 Coins',
+    description: 'A small top-up for gifts and emoji packs.',
+    emoji: '🪙',
+    priceMoneyMinor: 4900,
+    currency: 'INR',
+    coinAmount: 100,
+    sortOrder: 10,
+  },
+  {
+    _id: 'coins_500',
+    kind: 'COIN_PACK',
+    title: '500 Coins',
+    description: 'Best for regular gifters.',
+    emoji: '💰',
+    priceMoneyMinor: 19900,
+    currency: 'INR',
+    coinAmount: 500,
+    sortOrder: 20,
+  },
+  {
+    _id: 'coins_1200',
+    kind: 'COIN_PACK',
+    title: '1,200 Coins',
+    description: 'Biggest pack — extra coins included.',
+    emoji: '💎',
+    priceMoneyMinor: 39900,
+    currency: 'INR',
+    coinAmount: 1200,
+    sortOrder: 30,
+  },
+  {
+    _id: 'emoji_pack_hearts',
+    kind: 'EMOJI_PACK',
+    title: 'Hearts Pack',
+    description: 'Premium heart emojis for your matches.',
+    emoji: '💕',
+    emojis: ['💕', '💖', '💗', '💓', '💞', '💘'],
+    priceCoins: 80,
+    sortOrder: 40,
+  },
+  {
+    _id: 'emoji_pack_neon',
+    kind: 'EMOJI_PACK',
+    title: 'Neon Pack',
+    description: 'Bold neon vibes for late-night chats.',
+    emoji: '✨',
+    emojis: ['✨', '🔥', '⚡', '🌟', '💫', '🪩'],
+    priceCoins: 120,
+    sortOrder: 50,
+  },
+  {
+    _id: 'gift_rose',
+    kind: 'GIFT',
+    title: 'Rose',
+    description: 'A classic first move.',
+    emoji: '🌹',
+    priceCoins: 25,
+    sortOrder: 60,
+  },
+  {
+    _id: 'gift_coffee',
+    kind: 'GIFT',
+    title: 'Coffee',
+    description: 'Say let’s grab a drink.',
+    emoji: '☕',
+    priceCoins: 40,
+    sortOrder: 70,
+  },
+  {
+    _id: 'gift_teddy',
+    kind: 'GIFT',
+    title: 'Teddy',
+    description: 'Soft and thoughtful.',
+    emoji: '🧸',
+    priceCoins: 75,
+    sortOrder: 80,
+  },
+  {
+    _id: 'gift_chocolate',
+    kind: 'GIFT',
+    title: 'Chocolate',
+    description: 'Sweet and simple.',
+    emoji: '🍫',
+    priceCoins: 50,
+    sortOrder: 90,
+  },
+  {
+    _id: 'gift_sparkler',
+    kind: 'GIFT',
+    title: 'Sparkler',
+    description: 'Celebrate a great chat.',
+    emoji: '🎇',
+    priceCoins: 90,
+    sortOrder: 100,
+  },
+  {
+    _id: 'gift_crown',
+    kind: 'GIFT',
+    title: 'Crown',
+    description: 'Make them feel special.',
+    emoji: '👑',
+    priceCoins: 150,
+    sortOrder: 110,
+  },
+];
+
+export function findStoreItemDefinition(itemId) {
+  return DEFAULT_STORE_ITEMS.find((item) => item._id === itemId) ?? null;
+}
+
 export function periodDurationMs(period) {
   if (period === 'YEARLY') return 365 * 24 * 60 * 60 * 1000;
   return 30 * 24 * 60 * 60 * 1000;

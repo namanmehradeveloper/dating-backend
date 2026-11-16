@@ -11,6 +11,7 @@ import callRoutes from './call.routes.js';
 import safetyRoutes from './safety.routes.js';
 import notificationRoutes from './notification.routes.js';
 import subscriptionRoutes from './subscription.routes.js';
+import storeRoutes from './store.routes.js';
 import supportRoutes from './support.routes.js';
 import adminRoutes from './admin.routes.js';
 import * as profileController from '../controllers/profile.controller.js';
@@ -53,6 +54,9 @@ router.use(notificationRoutes);
 
 // /api/v1/subscriptions — paywall products, entitlement and store purchases.
 router.use('/subscriptions', subscriptionRoutes);
+
+// /api/v1/store — coin wallet, emoji packs, virtual gifts.
+router.use('/store', storeRoutes);
 
 // /api/v1/support, /account — FAQs, support tickets, account deletion and data export.
 router.use(supportRoutes);

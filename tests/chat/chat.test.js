@@ -60,6 +60,8 @@ describe('chat REST', () => {
       text: 'Hi Avery!',
       attachment: null,
       call: null,
+      gift: null,
+      paidEmoji: null,
       sentAt: expect.any(String),
       status: 'SENT',
       clientMessageId,

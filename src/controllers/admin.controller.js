@@ -29,7 +29,13 @@ import * as adminLoginHistory from '../services/admin/adminLoginHistory.service.
 import * as adminVerifications from '../services/admin/adminVerifications.service.js';
 import * as auditService from '../services/audit.service.js';
 import * as settingsService from '../services/settings.service.js';
+import * as storeService from '../services/store.service.js';
 import * as validators from '../validators/admin.validator.js';
+import {
+  validateAdminStoreItemCreate,
+  validateAdminStoreItemPatch,
+  validateAdminWalletAdjust,
+} from '../validators/store.validator.js';
 
 // ---- Session and dashboard ----
 
@@ -676,4 +682,48 @@ export async function listPayments(req, res) {
 
 export async function getPayment(req, res) {
   return ApiResponse.ok(res, await adminPayments.getPayment(req.params.paymentId));
+}
+
+// ---- Virtual store (ADMIN) ----
+
+export async function listStoreItems(req, res) {
+  const filters = validators.validateStoreItemListQuery(req.query);
+  return ApiResponse.ok(res, await storeService.adminListItems(filters, parsePagination(req.query)));
+}
+
+export async function createStoreItem(req, res) {
+  const input = validateAdminStoreItemCreate(req.body);
+  return ApiResponse.created(
+    res,
+    await storeService.adminUpsertItem(req.user, input, { recordAudit: auditService.recordAudit }),
+  );
+}
+
+export async function updateStoreItem(req, res) {
+  const changes = validateAdminStoreItemPatch(req.body);
+  return ApiResponse.ok(
+    res,
+    await storeService.adminPatchItem(req.user, req.params.itemId, changes, {
+      recordAudit: auditService.recordAudit,
+    }),
+  );
+}
+
+export async function getStoreWallet(req, res) {
+  return ApiResponse.ok(res, await storeService.adminGetWallet(req.params.userId));
+}
+
+export async function adjustStoreWallet(req, res) {
+  const input = validateAdminWalletAdjust(req.body);
+  return ApiResponse.ok(
+    res,
+    await storeService.adminAdjustWallet(req.user, req.params.userId, input, {
+      recordAudit: auditService.recordAudit,
+    }),
+  );
+}
+
+export async function listStorePurchases(req, res) {
+  const filters = validators.validateStorePurchaseListQuery(req.query);
+  return ApiResponse.ok(res, await storeService.adminListPurchases(filters, parsePagination(req.query)));
 }

@@ -16,6 +16,8 @@ import { notifyUser } from './notification.service.js';
 import { toPublicProfiles } from './profilePresenter.js';
 import { allowsOnlineStatus, resolveVisiblePresence } from './presence.service.js';
 import { emitToUser } from './realtime.service.js';
+import * as storeService from './store.service.js';
+import mongoose from 'mongoose';
 
 // Returns the other participant of a two-person conversation.
 export function otherParticipant(conversation, userId) {
@@ -45,6 +47,26 @@ export function presentCall(call) {
   };
 }
 
+function presentGift(gift) {
+  if (!gift?.itemId) return null;
+  return {
+    itemId: gift.itemId,
+    title: gift.title,
+    emoji: gift.emoji || '',
+    imageUrl: gift.imageUrl || '',
+    priceCoins: gift.priceCoins ?? 0,
+  };
+}
+
+function presentPaidEmoji(paidEmoji) {
+  if (!paidEmoji?.emoji) return null;
+  return {
+    packId: paidEmoji.packId,
+    packTitle: paidEmoji.packTitle,
+    emoji: paidEmoji.emoji,
+  };
+}
+
 // Shapes a message for the API. Status is UNSENT after delete-for-everyone, READ once the
 // recipient has read it, otherwise SENT.
 export function presentMessage(message) {
@@ -56,6 +78,8 @@ export function presentMessage(message) {
     text: unsent ? '' : (message.text ?? ''),
     attachment: unsent ? null : presentAttachment(message.attachment),
     call: unsent ? null : presentCall(message.call),
+    gift: unsent ? null : presentGift(message.gift),
+    paidEmoji: unsent ? null : presentPaidEmoji(message.paidEmoji),
     sentAt: message.sentAt,
     status: unsent ? 'UNSENT' : message.readAt ? 'READ' : 'SENT',
     clientMessageId: message.clientMessageId ?? null,
@@ -213,24 +237,38 @@ async function loadChatAttachment(senderId, mediaId) {
 }
 
 // Saves a message once per clientMessageId; a retried send returns the message already saved.
-async function saveMessage(conversationId, senderId, { text, attachment, clientMessageId, call = null }) {
-  const existing = await Message.findOne({ senderId, clientMessageId });
+async function saveMessage(
+  conversationId,
+  senderId,
+  { text, attachment, clientMessageId, call = null, gift = null, paidEmoji = null },
+  session = null,
+) {
+  const existingQuery = Message.findOne({ senderId, clientMessageId });
+  if (session) existingQuery.session(session);
+  const existing = await existingQuery;
   if (existing) return { message: existing, isNew: false };
 
   try {
-    const message = await Message.create({
+    const payload = {
       conversationId,
       senderId,
       text,
       attachment,
       call,
+      gift,
+      paidEmoji,
       clientMessageId,
       sentAt: new Date(),
-    });
-    return { message, isNew: true };
+    };
+    const created = session
+      ? (await Message.create([payload], { session }))[0]
+      : await Message.create(payload);
+    return { message: created, isNew: true };
   } catch (error) {
     if (error?.code !== 11000) throw error;
-    const byClientId = await Message.findOne({ senderId, clientMessageId });
+    const byClientIdQuery = Message.findOne({ senderId, clientMessageId });
+    if (session) byClientIdQuery.session(session);
+    const byClientId = await byClientIdQuery;
     if (byClientId) return { message: byClientId, isNew: false };
     if (call?.callId) {
       const byCallId = await Message.findOne({ 'call.callId': call.callId });
@@ -289,14 +327,71 @@ export async function recordCallMessage(callDoc) {
   return presented;
 }
 
-// Sends a message (text, an uploaded chat photo, or both): checks membership, the active match and
-// blocks, saves it, then announces it with message:new to both members and a content-free push to the recipient.
-export async function sendMessage(userId, conversationId, { text, attachmentMediaId, clientMessageId }) {
+// Sends a message (text, photo, gift, or paid emoji): checks membership, the active match and
+// blocks, saves it (deducting store inventory/coins when needed), then announces message:new.
+export async function sendMessage(
+  userId,
+  conversationId,
+  { text, attachmentMediaId, giftItemId, paidEmoji, clientMessageId },
+) {
   const conversation = await loadParticipantConversation(userId, conversationId);
   await assertCanChat(conversation, userId);
 
+  // Idempotent replay: never deduct coins/inventory twice for the same clientMessageId.
+  const existing = await Message.findOne({ senderId: userId, clientMessageId });
+  if (existing) {
+    if (existing.conversationId !== conversationId) {
+      throw ApiError.conflict('This clientMessageId was already used in another conversation.');
+    }
+    return presentMessage(existing);
+  }
+
   const attachment = attachmentMediaId ? await loadChatAttachment(userId, attachmentMediaId) : null;
-  const { message, isNew } = await saveMessage(conversationId, userId, { text, attachment, clientMessageId });
+  let gift = null;
+  let paidEmojiSnapshot = null;
+  let message;
+  let isNew = true;
+
+  if (giftItemId || paidEmoji) {
+    const session = await mongoose.startSession();
+    session.startTransaction();
+    try {
+      if (giftItemId) gift = await storeService.consumeGiftForSend(userId, giftItemId, session);
+      if (paidEmoji) {
+        paidEmojiSnapshot = await storeService.assertOwnsEmojiPack(
+          userId,
+          paidEmoji.packId,
+          paidEmoji.emoji,
+          session,
+        );
+      }
+      const saved = await saveMessage(
+        conversationId,
+        userId,
+        {
+          text: text || '',
+          attachment: null,
+          gift,
+          paidEmoji: paidEmojiSnapshot,
+          clientMessageId,
+        },
+        session,
+      );
+      message = saved.message;
+      isNew = saved.isNew;
+      await session.commitTransaction();
+    } catch (error) {
+      await session.abortTransaction();
+      throw error;
+    } finally {
+      session.endSession();
+    }
+  } else {
+    const saved = await saveMessage(conversationId, userId, { text, attachment, clientMessageId });
+    message = saved.message;
+    isNew = saved.isNew;
+  }
+
   if (message.conversationId !== conversationId) {
     throw ApiError.conflict('This clientMessageId was already used in another conversation.');
   }
@@ -317,8 +412,8 @@ export async function sendMessage(userId, conversationId, { text, attachmentMedi
     }
     await notifyUser(recipientId, {
       type: 'NEW_MESSAGE',
-      title: 'New message',
-      body: 'You have a new message.',
+      title: gift ? 'New gift' : paidEmojiSnapshot ? 'New emoji' : 'New message',
+      body: gift ? 'You received a gift.' : 'You have a new message.',
       data: { conversationId },
     });
   }

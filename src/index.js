@@ -9,6 +9,7 @@ import { createApp, API_PREFIX } from './app.js';
 import { startAccountDeletionJob } from './jobs/accountDeletion.job.js';
 import { startSubscriptionExpiryJob } from './jobs/subscriptionExpiry.job.js';
 import { ensureDefaultInterests } from './services/interest.service.js';
+import { ensureDefaultStoreItems } from './services/store.service.js';
 import { ensureUploadFolders } from './services/media.service.js';
 import { createSocketServer } from './socket/index.js';
 import { startCallExpiryJob } from './services/call.service.js';
@@ -40,6 +41,7 @@ async function startServer() {
   }
   await ensureUploadFolders();
   await ensureDefaultInterests();
+  await ensureDefaultStoreItems();
   startAccountDeletionJob();
   const stopSubscriptionExpiryJob = startSubscriptionExpiryJob();
   const stopCallExpiryJob = startCallExpiryJob();
