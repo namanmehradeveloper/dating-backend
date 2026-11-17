@@ -152,13 +152,34 @@ export const DEFAULT_STORE_ITEMS = [
     sortOrder: 50,
   },
   {
+    _id: 'gift_wave',
+    kind: 'GIFT',
+    title: 'Wave',
+    description: 'A free hello during calls and chat.',
+    emoji: '👋',
+    priceCoins: 0,
+    giftCategory: 'FREE',
+    sortOrder: 55,
+  },
+  {
     _id: 'gift_rose',
     kind: 'GIFT',
     title: 'Rose',
     description: 'A classic first move.',
     emoji: '🌹',
-    priceCoins: 25,
+    priceCoins: 10,
+    giftCategory: 'POPULAR',
     sortOrder: 60,
+  },
+  {
+    _id: 'gift_heart',
+    kind: 'GIFT',
+    title: 'Heart',
+    description: 'Send some love live.',
+    emoji: '💖',
+    priceCoins: 20,
+    giftCategory: 'POPULAR',
+    sortOrder: 65,
   },
   {
     _id: 'gift_coffee',
@@ -167,6 +188,7 @@ export const DEFAULT_STORE_ITEMS = [
     description: 'Say let’s grab a drink.',
     emoji: '☕',
     priceCoins: 40,
+    giftCategory: 'POPULAR',
     sortOrder: 70,
   },
   {
@@ -175,7 +197,8 @@ export const DEFAULT_STORE_ITEMS = [
     title: 'Teddy',
     description: 'Soft and thoughtful.',
     emoji: '🧸',
-    priceCoins: 75,
+    priceCoins: 50,
+    giftCategory: 'POPULAR',
     sortOrder: 80,
   },
   {
@@ -184,7 +207,8 @@ export const DEFAULT_STORE_ITEMS = [
     title: 'Chocolate',
     description: 'Sweet and simple.',
     emoji: '🍫',
-    priceCoins: 50,
+    priceCoins: 100,
+    giftCategory: 'PREMIUM',
     sortOrder: 90,
   },
   {
@@ -194,7 +218,18 @@ export const DEFAULT_STORE_ITEMS = [
     description: 'Celebrate a great chat.',
     emoji: '🎇',
     priceCoins: 90,
+    giftCategory: 'PREMIUM',
     sortOrder: 100,
+  },
+  {
+    _id: 'gift_ring',
+    kind: 'GIFT',
+    title: 'Ring',
+    description: 'A dazzling premium gesture.',
+    emoji: '💍',
+    priceCoins: 500,
+    giftCategory: 'PREMIUM',
+    sortOrder: 105,
   },
   {
     _id: 'gift_crown',
@@ -202,9 +237,21 @@ export const DEFAULT_STORE_ITEMS = [
     title: 'Crown',
     description: 'Make them feel special.',
     emoji: '👑',
-    priceCoins: 150,
+    priceCoins: 1000,
+    giftCategory: 'PREMIUM',
     sortOrder: 110,
   },
+];
+
+/** Call/chat gift ids kept in sync even when the catalogue was seeded earlier. */
+export const CALL_GIFT_SYNC_IDS = [
+  'gift_wave',
+  'gift_rose',
+  'gift_heart',
+  'gift_teddy',
+  'gift_chocolate',
+  'gift_ring',
+  'gift_crown',
 ];
 
 export function findStoreItemDefinition(itemId) {

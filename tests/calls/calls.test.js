@@ -4,6 +4,7 @@ import { io as connectClient } from 'socket.io-client';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { createApp } from '../../src/app.js';
 import { Call } from '../../src/models/Call.js';
+import { Wallet } from '../../src/models/Wallet.js';
 import { createSocketServer } from '../../src/socket/index.js';
 import { bearer, createMember, useTestDatabase } from '../helpers/factories.js';
 import { matchMembers } from '../helpers/social.js';
@@ -184,6 +185,43 @@ describe('call signalling API', () => {
     const busyLogs = secondThread.body.data.items.filter((item) => item.call?.status === 'BUSY');
     expect(busyLogs).toHaveLength(2);
     expect(busyLogs[0].call.callId).not.toBe(busyLogs[1].call.callId);
+  });
+
+  it('sends a call gift with atomic coin debit and call:gift socket event', async () => {
+    const caller = await createMember({ profile: { displayName: 'Rohit' } });
+    const callee = await createMember({ profile: { displayName: 'Priya' } });
+    const match = await matchMembers(app, caller, callee);
+    await Wallet.create({ _id: caller.id, userId: caller.id, coinBalance: 100 });
+
+    const started = await start(caller, match.conversationId, 'VIDEO');
+    await request(app).post(`/api/v1/calls/${started.body.data.call.id}/accept`).set(bearer(callee.token));
+
+    const calleeSocket = await connect(callee.token);
+    const giftEvent = nextEvent(calleeSocket, 'call:gift');
+    const sent = await request(app)
+      .post(`/api/v1/calls/${started.body.data.call.id}/gifts`)
+      .set(bearer(caller.token))
+      .send({ giftItemId: 'gift_rose' });
+
+    expect(sent.status).toBe(200);
+    expect(sent.body.data.gift).toMatchObject({ itemId: 'gift_rose', title: 'Rose', priceCoins: 10 });
+    expect(sent.body.data.wallet.coinBalance).toBe(90);
+    expect(await Wallet.findById(caller.id).then((w) => w.coinBalance)).toBe(90);
+
+    const payload = await giftEvent;
+    expect(payload).toMatchObject({
+      callId: started.body.data.call.id,
+      fromUserId: caller.id,
+      fromName: 'Rohit',
+      gift: { itemId: 'gift_rose', emoji: '🌹' },
+    });
+
+    const broke = await request(app)
+      .post(`/api/v1/calls/${started.body.data.call.id}/gifts`)
+      .set(bearer(caller.token))
+      .send({ giftItemId: 'gift_crown' });
+    expect(broke.status).toBe(403);
+    expect(broke.body.error.details).toContainEqual({ field: 'coinBalance', reason: 'INSUFFICIENT_COINS' });
   });
 
   it('does not disclose calls to non-participants or allow outsiders to place calls', async () => {

@@ -4,6 +4,7 @@ import { isMissing, requireObjectBody, throwIfInvalid, trimmedText } from './com
 
 const PLATFORMS = new Set(['IOS', 'ANDROID', 'WEB']);
 const KINDS = new Set(['COIN_PACK', 'EMOJI_PACK', 'GIFT']);
+const GIFT_CATEGORIES = new Set(['FREE', 'POPULAR', 'PREMIUM']);
 
 export function validateStoreCheckout(body) {
   requireObjectBody(body);
@@ -52,6 +53,7 @@ export function validateAdminStoreItemCreate(body) {
     imageUrl: trimmedText(body.imageUrl) ?? '',
     emojis: Array.isArray(body.emojis) ? body.emojis.filter((e) => typeof e === 'string') : [],
     priceCoins: Number.isFinite(body.priceCoins) ? Math.max(0, Math.trunc(body.priceCoins)) : 0,
+    giftCategory: GIFT_CATEGORIES.has(body.giftCategory) ? body.giftCategory : undefined,
     priceMoneyMinor: Number.isFinite(body.priceMoneyMinor) ? Math.max(0, Math.trunc(body.priceMoneyMinor)) : 0,
     currency: trimmedText(body.currency) || 'INR',
     coinAmount: Number.isFinite(body.coinAmount) ? Math.max(0, Math.trunc(body.coinAmount)) : 0,
@@ -71,6 +73,10 @@ export function validateAdminStoreItemPatch(body) {
     changes.emojis = Array.isArray(body.emojis) ? body.emojis.filter((e) => typeof e === 'string') : [];
   }
   if (body.priceCoins !== undefined) changes.priceCoins = Math.max(0, Math.trunc(Number(body.priceCoins) || 0));
+  if (body.giftCategory !== undefined) {
+    if (!GIFT_CATEGORIES.has(body.giftCategory)) throwIfInvalid([{ field: 'giftCategory', reason: 'UNKNOWN_OPTION' }]);
+    changes.giftCategory = body.giftCategory;
+  }
   if (body.priceMoneyMinor !== undefined) {
     changes.priceMoneyMinor = Math.max(0, Math.trunc(Number(body.priceMoneyMinor) || 0));
   }

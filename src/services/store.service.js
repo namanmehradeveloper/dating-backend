@@ -2,7 +2,7 @@
 
 import { randomUUID } from 'node:crypto';
 import mongoose from 'mongoose';
-import { DEFAULT_STORE_ITEMS } from '../config/catalog.js';
+import { CALL_GIFT_SYNC_IDS, DEFAULT_STORE_ITEMS, findStoreItemDefinition } from '../config/catalog.js';
 import { env } from '../config/env.js';
 import { InventoryItem } from '../models/InventoryItem.js';
 import { StoreItem } from '../models/StoreItem.js';
@@ -14,6 +14,14 @@ import { buildPage, getAfterCursorFilter, getPageSort } from '../utils/paginatio
 const CHECKOUT_TTL_MS = 30 * 60 * 1000;
 const DEMO_OUTCOMES = new Set(['SUCCESS', 'FAILURE']);
 
+function resolveGiftCategory(doc) {
+  if (doc.kind !== 'GIFT') return undefined;
+  if (doc.giftCategory) return doc.giftCategory;
+  if ((doc.priceCoins || 0) <= 0) return 'FREE';
+  if ((doc.priceCoins || 0) >= 100) return 'PREMIUM';
+  return 'POPULAR';
+}
+
 export function presentStoreItem(doc) {
   return {
     id: doc._id,
@@ -24,6 +32,7 @@ export function presentStoreItem(doc) {
     imageUrl: doc.imageUrl || '',
     emojis: doc.emojis || [],
     priceCoins: doc.priceCoins || 0,
+    giftCategory: resolveGiftCategory(doc),
     priceMoneyMinor: doc.priceMoneyMinor || 0,
     currency: doc.currency || 'INR',
     coinAmount: doc.coinAmount || 0,
@@ -36,16 +45,49 @@ export function presentStoreItem(doc) {
   };
 }
 
-export async function ensureDefaultStoreItems() {
-  if ((await StoreItem.estimatedDocumentCount()) > 0) return;
-  try {
-    await StoreItem.insertMany(
-      DEFAULT_STORE_ITEMS.map((item) => ({ ...item, isActive: true })),
-      { ordered: false },
+/** Upserts call-gift catalogue rows so existing DBs pick up Heart/Ring/pricing without a wipe. */
+async function syncCallGiftCatalog() {
+  for (const id of CALL_GIFT_SYNC_IDS) {
+    const def = findStoreItemDefinition(id);
+    if (!def || def.kind !== 'GIFT') continue;
+    await StoreItem.updateOne(
+      { _id: id },
+      {
+        $set: {
+          kind: 'GIFT',
+          title: def.title,
+          description: def.description || '',
+          emoji: def.emoji || '',
+          imageUrl: def.imageUrl || '',
+          priceCoins: def.priceCoins || 0,
+          giftCategory: def.giftCategory || resolveGiftCategory(def),
+          sortOrder: def.sortOrder ?? 0,
+        },
+        $setOnInsert: {
+          isActive: true,
+          emojis: [],
+          priceMoneyMinor: 0,
+          currency: 'INR',
+          coinAmount: 0,
+        },
+      },
+      { upsert: true },
     );
-  } catch (error) {
-    if (error?.code !== 11000 && !error?.writeErrors) throw error;
   }
+}
+
+export async function ensureDefaultStoreItems() {
+  if ((await StoreItem.estimatedDocumentCount()) === 0) {
+    try {
+      await StoreItem.insertMany(
+        DEFAULT_STORE_ITEMS.map((item) => ({ ...item, isActive: true })),
+        { ordered: false },
+      );
+    } catch (error) {
+      if (error?.code !== 11000 && !error?.writeErrors) throw error;
+    }
+  }
+  await syncCallGiftCatalog();
 }
 
 async function getOrCreateWallet(userId, session) {
@@ -175,17 +217,54 @@ async function creditCoins(userId, amount, session) {
   return wallet;
 }
 
+/** Atomic coin debit: only succeeds when balance covers the amount (safe under concurrency). */
 async function debitCoins(userId, amount, session) {
-  const wallet = await getOrCreateWallet(userId, session);
-  if ((wallet?.coinBalance ?? 0) < amount) {
+  if (amount < 0) {
+    throw ApiError.validation([{ field: 'amount', reason: 'INVALID' }]);
+  }
+  await getOrCreateWallet(userId, session);
+  if (amount === 0) {
+    const wallet = await getOrCreateWallet(userId, session);
+    return wallet;
+  }
+  const updated = await Wallet.findOneAndUpdate(
+    { userId, coinBalance: { $gte: amount } },
+    { $inc: { coinBalance: -amount } },
+    { returnDocument: 'after', session: session || undefined },
+  );
+  if (!updated) {
     throw new ApiError('FORBIDDEN', {
       message: 'Not enough coins. Buy a coin pack first.',
       details: [{ field: 'coinBalance', reason: 'INSUFFICIENT_COINS' }],
     });
   }
-  wallet.coinBalance -= amount;
-  await wallet.save({ session });
-  return wallet;
+  return updated;
+}
+
+async function recordWalletSpend(userId, item, coinsSpent, session, meta = {}) {
+  if (!item || coinsSpent < 0) return null;
+  const [purchase] = await StorePurchase.create(
+    [
+      {
+        userId,
+        itemId: item._id || item.itemId,
+        kind: item.kind || 'GIFT',
+        provider: 'wallet',
+        environment: env.payments.provider === 'demo' ? 'demo' : 'live',
+        platform: 'WEB',
+        amountMinor: 0,
+        currency: 'INR',
+        coinsDelta: -coinsSpent,
+        status: 'SUCCEEDED',
+        checkoutId: `wallet_${randomUUID().replaceAll('-', '')}`,
+        verifiedAt: new Date(),
+        creditedAt: new Date(),
+        providerMeta: { spend: true, ...meta },
+      },
+    ],
+    { session },
+  );
+  return purchase;
 }
 
 async function addInventory(userId, item, quantity, session) {
@@ -335,20 +414,26 @@ export async function listPurchaseHistory(userId, { limit, cursor }) {
   return { items: page.items.map(presentPurchase), nextCursor: page.nextCursor };
 }
 
-// Used by chat when sending a gift: prefer inventory unit, else debit coins at send time.
-export async function consumeGiftForSend(userId, itemId, session) {
+// Used by chat/call when sending a gift: prefer inventory unit, else atomic coin debit + ledger.
+export async function consumeGiftForSend(userId, itemId, session, meta = {}) {
   await ensureDefaultStoreItems();
   const item = await StoreItem.findById(itemId).session(session);
   if (!item || item.isActive === false || item.kind !== 'GIFT') {
     throw ApiError.notFound('This gift is not available.');
   }
 
+  const price = item.priceCoins || 0;
+  let paidWith = 'inventory';
   const inventory = await InventoryItem.findOne({ userId, itemId, quantity: { $gt: 0 } }).session(session);
   if (inventory) {
     inventory.quantity -= 1;
     await inventory.save({ session });
   } else {
-    await debitCoins(userId, item.priceCoins || 0, session);
+    await debitCoins(userId, price, session);
+    if (price > 0) {
+      await recordWalletSpend(userId, item, price, session, { source: meta.source || 'chat_gift', ...meta });
+    }
+    paidWith = 'coins';
   }
 
   return {
@@ -356,7 +441,9 @@ export async function consumeGiftForSend(userId, itemId, session) {
     title: item.title,
     emoji: item.emoji || '',
     imageUrl: item.imageUrl || '',
-    priceCoins: item.priceCoins || 0,
+    priceCoins: price,
+    giftCategory: resolveGiftCategory(item),
+    paidWith,
   };
 }
 
@@ -415,6 +502,7 @@ export async function adminUpsertItem(actor, input, { recordAudit }) {
     imageUrl: input.imageUrl ?? '',
     emojis: input.emojis ?? [],
     priceCoins: input.priceCoins ?? 0,
+    giftCategory: input.giftCategory || undefined,
     priceMoneyMinor: input.priceMoneyMinor ?? 0,
     currency: input.currency ?? 'INR',
     coinAmount: input.coinAmount ?? 0,
@@ -445,6 +533,7 @@ export async function adminPatchItem(actor, itemId, changes, { recordAudit }) {
     'imageUrl',
     'emojis',
     'priceCoins',
+    'giftCategory',
     'priceMoneyMinor',
     'currency',
     'coinAmount',

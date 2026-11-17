@@ -46,3 +46,22 @@ export async function cancel(req, res) {
 export async function end(req, res) {
   return ApiResponse.ok(res, await callService.endCall(req.user.id, req.params.callId));
 }
+
+function validateCallGift(body) {
+  const details = [];
+  if (typeof body?.giftItemId !== 'string' || !body.giftItemId.trim()) {
+    details.push({ field: 'giftItemId', reason: 'REQUIRED' });
+  }
+  if (body?.clientMessageId !== undefined && (typeof body.clientMessageId !== 'string' || !body.clientMessageId.trim())) {
+    details.push({ field: 'clientMessageId', reason: 'INVALID' });
+  }
+  if (details.length) throw ApiError.validation(details);
+  return {
+    giftItemId: body.giftItemId.trim(),
+    clientMessageId: typeof body.clientMessageId === 'string' ? body.clientMessageId.trim() : undefined,
+  };
+}
+
+export async function sendGift(req, res) {
+  return ApiResponse.ok(res, await callService.sendCallGift(req.user.id, req.params.callId, validateCallGift(req.body)));
+}

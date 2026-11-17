@@ -55,6 +55,7 @@ function presentGift(gift) {
     emoji: gift.emoji || '',
     imageUrl: gift.imageUrl || '',
     priceCoins: gift.priceCoins ?? 0,
+    giftCategory: gift.giftCategory || undefined,
   };
 }
 
@@ -332,7 +333,7 @@ export async function recordCallMessage(callDoc) {
 export async function sendMessage(
   userId,
   conversationId,
-  { text, attachmentMediaId, giftItemId, paidEmoji, clientMessageId },
+  { text, attachmentMediaId, giftItemId, paidEmoji, clientMessageId, giftSource },
 ) {
   const conversation = await loadParticipantConversation(userId, conversationId);
   await assertCanChat(conversation, userId);
@@ -356,7 +357,13 @@ export async function sendMessage(
     const session = await mongoose.startSession();
     session.startTransaction();
     try {
-      if (giftItemId) gift = await storeService.consumeGiftForSend(userId, giftItemId, session);
+      if (giftItemId) {
+        gift = await storeService.consumeGiftForSend(userId, giftItemId, session, {
+          source: giftSource || 'chat_gift',
+        });
+        // Ledger meta must not be persisted on the message snapshot.
+        if (gift?.paidWith) delete gift.paidWith;
+      }
       if (paidEmoji) {
         paidEmojiSnapshot = await storeService.assertOwnsEmojiPack(
           userId,

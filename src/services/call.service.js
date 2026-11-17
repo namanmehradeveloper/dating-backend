@@ -3,9 +3,12 @@ import mongoose from 'mongoose';
 import agoraToken from 'agora-token';
 import { env } from '../config/env.js';
 import { Call, ACTIVE_CALL_STATUSES } from '../models/Call.js';
-import { getConversation, recordCallMessage } from './chat.service.js';
+import { Profile } from '../models/Profile.js';
+import { getConversation, recordCallMessage, sendMessage } from './chat.service.js';
 import { emitToUser } from './realtime.service.js';
+import * as storeService from './store.service.js';
 import { ApiError } from '../utils/ApiError.js';
+import { buildFileUrl } from '../utils/fileUrls.js';
 import { logger } from '../utils/logger.js';
 
 async function appendCallToChat(call) {
@@ -262,6 +265,52 @@ export async function listCallHistory(userId, limit) {
     .limit(limit)
     .lean();
   return { items: calls.map(callDto) };
+}
+
+/**
+ * Sends a paid/free gift during an accepted call.
+ * Deducts coins atomically (via chat gift send), writes chat history, and emits call:gift.
+ */
+export async function sendCallGift(userId, callId, { giftItemId, clientMessageId }) {
+  userId = String(userId);
+  const call = await findCallForParticipant(callId, userId);
+  if (call.status !== 'ACCEPTED') {
+    throw ApiError.conflict('Gifts can only be sent during an active call.');
+  }
+
+  const idempotencyKey = clientMessageId || randomUUID();
+  const message = await sendMessage(userId, call.conversationId, {
+    giftItemId,
+    clientMessageId: idempotencyKey,
+    giftSource: 'call_gift',
+  });
+
+  const profile = await Profile.findOne({ userId }).select('displayName photos').lean();
+  const photo = Array.isArray(profile?.photos) && profile.photos.length
+    ? profile.photos.slice().sort((a, b) => (a.order ?? 0) - (b.order ?? 0))[0]
+    : null;
+
+  const wallet = await storeService.getWallet(userId);
+  const payload = {
+    callId: String(call._id),
+    conversationId: call.conversationId,
+    fromUserId: userId,
+    fromName: profile?.displayName || 'Dating Cloud member',
+    fromPhotoUrl: photo?.relativePath ? buildFileUrl(photo.relativePath) : null,
+    gift: message.gift,
+    messageId: message.id,
+    sentAt: message.sentAt || new Date().toISOString(),
+  };
+
+  emitToUser(call.callerId, 'call:gift', payload);
+  emitToUser(call.calleeId, 'call:gift', payload);
+
+  return {
+    gift: message.gift,
+    message,
+    wallet,
+    event: payload,
+  };
 }
 
 // Marks timed-out ringing calls as missed and notifies both participants.

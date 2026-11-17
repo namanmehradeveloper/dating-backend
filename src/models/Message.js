@@ -38,6 +38,7 @@ const giftSchema = new mongoose.Schema(
     emoji: { type: String, default: '' },
     imageUrl: { type: String, default: '' },
     priceCoins: { type: Number, default: 0 },
+    giftCategory: { type: String, enum: ['FREE', 'POPULAR', 'PREMIUM'], default: undefined },
   },
   { _id: false },
 );

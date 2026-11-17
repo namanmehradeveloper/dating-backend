@@ -3,6 +3,7 @@
 import mongoose from 'mongoose';
 
 export const STORE_ITEM_KINDS = ['COIN_PACK', 'EMOJI_PACK', 'GIFT'];
+export const GIFT_CATEGORIES = ['FREE', 'POPULAR', 'PREMIUM'];
 
 const storeItemSchema = new mongoose.Schema(
   {
@@ -17,6 +18,8 @@ const storeItemSchema = new mongoose.Schema(
     emojis: { type: [String], default: [] },
     // Cost in coins to buy this pack/gift from the wallet (not used for COIN_PACK).
     priceCoins: { type: Number, default: 0, min: 0 },
+    // GIFT only — Free / Popular / Premium tabs in call + store UIs.
+    giftCategory: { type: String, enum: GIFT_CATEGORIES, default: 'POPULAR' },
     // COIN_PACK only — real/demo money charge and coins credited on success.
     priceMoneyMinor: { type: Number, default: 0, min: 0 },
     currency: { type: String, default: 'INR' },

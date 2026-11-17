@@ -110,10 +110,10 @@ describe('virtual store', () => {
       itemId: 'gift_rose',
       title: 'Rose',
       emoji: '🌹',
-      priceCoins: 25,
+      priceCoins: 10,
     });
     expect(res.body.data.text).toBe('');
-    expect(await Wallet.findById(member.id).then((w) => w.coinBalance)).toBe(25);
+    expect(await Wallet.findById(member.id).then((w) => w.coinBalance)).toBe(40);
 
     const retry = await request(app)
       .post(`/api/v1/conversations/${match.conversationId}/messages`)
@@ -121,7 +121,7 @@ describe('virtual store', () => {
       .set('Idempotency-Key', clientMessageId)
       .send({ giftItemId: 'gift_rose', clientMessageId });
     expect(retry.body.data.id).toBe(res.body.data.id);
-    expect(await Wallet.findById(member.id).then((w) => w.coinBalance)).toBe(25);
+    expect(await Wallet.findById(member.id).then((w) => w.coinBalance)).toBe(40);
     expect(await Message.countDocuments({ 'gift.itemId': 'gift_rose' })).toBe(1);
   });
 
