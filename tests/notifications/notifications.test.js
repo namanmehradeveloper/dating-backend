@@ -76,6 +76,44 @@ describe('notification inbox', () => {
     });
   });
 
+  it('stores NEW_MESSAGE inbox rows with ids only and dedupes by messageId', async () => {
+    const member = await createMember();
+    const payload = {
+      type: 'NEW_MESSAGE',
+      title: 'New message',
+      body: 'You have a new message.',
+      data: {
+        conversationId: 'cnv_test1',
+        messageId: 'msg_test1',
+        senderId: 'usr_sender',
+        receiverId: member.id,
+      },
+    };
+
+    const first = await notifyUser(member.id, payload);
+    const second = await notifyUser(member.id, payload);
+    expect(first.id).toBe(second.id);
+    expect(await Notification.countDocuments({ userId: member.id, type: 'NEW_MESSAGE' })).toBe(1);
+
+    const res = await request(app).get('/api/v1/notifications').set(bearer(member.token));
+    const row = res.body.data.items.find((item) => item.type === 'NEW_MESSAGE');
+    expect(row).toEqual({
+      id: expect.stringMatching(/^ntf_/),
+      type: 'NEW_MESSAGE',
+      title: 'New message',
+      body: 'You have a new message.',
+      data: {
+        conversationId: 'cnv_test1',
+        messageId: 'msg_test1',
+        senderId: 'usr_sender',
+        receiverId: member.id,
+      },
+      createdAt: expect.any(String),
+      readAt: null,
+    });
+    expect(JSON.stringify(row)).not.toMatch(/secret chat text/i);
+  });
+
   it('paginates and marks notifications read', async () => {
     const member = await createMember();
     for (let index = 0; index < 3; index += 1) {

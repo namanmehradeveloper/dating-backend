@@ -44,16 +44,53 @@ async function wantsNotification(userId, type, isPromotion) {
   return preferenceKey ? preferences[preferenceKey] : true;
 }
 
-// Notifies a member: stores an inbox entry (except for chat messages, which have their own
-// unread counts) and hands the notification to push. Returns the inbox entry, or null when skipped.
+// Normalizes notification `data` to string values (schema: Map of String). Never stores message text.
+function sanitizeNotificationData(data = {}) {
+  const out = {};
+  for (const [key, value] of Object.entries(data)) {
+    if (value == null) continue;
+    out[key] = String(value);
+  }
+  return out;
+}
+
+// Notifies a member: stores an inbox entry and hands the notification to push.
+// NEW_MESSAGE rows are deduped by data.messageId when present. Bodies stay generic (no message text).
+// Returns the inbox entry, or null when skipped by preferences.
 export async function notifyUser(userId, { type, title, body, data = {}, campaignId, isPromotion = false }) {
   if (!(await wantsNotification(userId, type, isPromotion))) return null;
 
+  const safeData = sanitizeNotificationData(data);
   let notification = null;
-  if (type !== 'NEW_MESSAGE') {
-    notification = await Notification.create({ userId, type, title, body, data, campaignId });
+
+  if (type === 'NEW_MESSAGE' && safeData.messageId) {
+    notification = await Notification.findOne({
+      userId,
+      type: 'NEW_MESSAGE',
+      'data.messageId': safeData.messageId,
+    });
+    if (!notification) {
+      notification = await Notification.create({
+        userId,
+        type,
+        title,
+        body,
+        data: safeData,
+        campaignId,
+      });
+    }
+  } else {
+    notification = await Notification.create({
+      userId,
+      type,
+      title,
+      body,
+      data: safeData,
+      campaignId,
+    });
   }
-  await sendPushToUser(userId, { type, title, body, data });
+
+  await sendPushToUser(userId, { type, title, body, data: safeData });
   return notification;
 }
 

@@ -68,6 +68,31 @@ describe('chat REST', () => {
     });
   });
 
+  it('creates a NEW_MESSAGE inbox row for the recipient only (no message text)', async () => {
+    const res = await sendMessage(alex, match.conversationId, 'Secret private text');
+    expect(res.status).toBe(201);
+    const messageId = res.body.data.id;
+
+    const recipientInbox = await request(app).get('/api/v1/notifications').set(bearer(avery.token));
+    const row = recipientInbox.body.data.items.find((item) => item.type === 'NEW_MESSAGE');
+    expect(row).toMatchObject({
+      type: 'NEW_MESSAGE',
+      title: 'New message',
+      body: 'You have a new message.',
+      data: {
+        conversationId: match.conversationId,
+        messageId,
+        senderId: alex.id,
+        receiverId: avery.id,
+      },
+      readAt: null,
+    });
+    expect(JSON.stringify(row)).not.toContain('Secret private text');
+
+    const senderInbox = await request(app).get('/api/v1/notifications').set(bearer(alex.token));
+    expect(senderInbox.body.data.items.some((item) => item.type === 'NEW_MESSAGE')).toBe(false);
+  });
+
   it('returns the same message for a retried send', async () => {
     const clientMessageId = uuidv4();
     const first = await sendMessage(alex, match.conversationId, 'Hello', clientMessageId);

@@ -417,11 +417,17 @@ export async function sendMessage(
     for (const participantId of conversation.participantIds) {
       emitToUser(participantId, 'message:new', { message: presented });
     }
+    // Inbox + push for the recipient only. Payload ids only — never message text.
     await notifyUser(recipientId, {
       type: 'NEW_MESSAGE',
       title: gift ? 'New gift' : paidEmojiSnapshot ? 'New emoji' : 'New message',
-      body: gift ? 'You received a gift.' : 'You have a new message.',
-      data: { conversationId },
+      body: gift ? 'You received a gift.' : paidEmojiSnapshot ? 'You received an emoji.' : 'You have a new message.',
+      data: {
+        conversationId,
+        messageId: presented.id,
+        senderId: userId,
+        receiverId: recipientId,
+      },
     });
   }
   return presented;
