@@ -7,7 +7,7 @@ import { AdminRole } from '../../src/models/AdminRole.js';
 import { AuditLog } from '../../src/models/AuditLog.js';
 import { User } from '../../src/models/User.js';
 import { ensureSystemRoles } from '../../src/services/rbac.service.js';
-import { generateTotpSecret, verifyTotp } from '../../src/services/totp.service.js';
+import { generateTotpSecret } from '../../src/services/totp.service.js';
 import { bearer, createMember, createStaff, useTestDatabase } from '../helpers/factories.js';
 
 const app = createApp();
@@ -117,10 +117,9 @@ describe('admin roles and permissions', () => {
     expect(await AuditLog.findOne({ action: 'STAFF_FORCE_LOGOUT', targetId: mod.id })).toBeTruthy();
   });
 
-  it('requires 2FA challenge on login when enabled', async () => {
+  it('allows staff email/password login while panel 2FA challenge remains disabled', async () => {
     const bcrypt = (await import('bcryptjs')).default;
-    const { completeTwoFactorLogin, signInWithEmail } = await import('../../src/services/auth.service.js');
-    const { generateTotpCode } = await import('../../src/services/totp.service.js');
+    const { signInWithEmail } = await import('../../src/services/auth.service.js');
     const secret = generateTotpSecret();
     const account = await User.create({
       email: '2fa.staff@example.test',
@@ -130,16 +129,10 @@ describe('admin roles and permissions', () => {
       twoFactor: { enabled: true, secret, backupCodes: [] },
     });
 
-    const challenge = await signInWithEmail({ email: account.email, password: 'password12345' });
-    expect(challenge.requiresTwoFactor).toBe(true);
-    expect(challenge.pendingToken).toBeTruthy();
-
-    const code = generateTotpCode(secret);
-    expect(verifyTotp(secret, code)).toBe(true);
-
-    const finished = await completeTwoFactorLogin({ pendingToken: challenge.pendingToken, code });
-    expect(finished.tokens.accessToken).toBeTruthy();
-    expect(finished.user.role).toBe('ADMIN');
+    const result = await signInWithEmail({ email: account.email, password: 'password12345' });
+    expect(result.tokens.accessToken).toBeTruthy();
+    expect(result.user.role).toBe('ADMIN');
+    expect(result.requiresTwoFactor).toBeFalsy();
   });
 
   it('rejects members on staff and roles routes', async () => {

@@ -95,10 +95,11 @@ describe('admin profiles', () => {
     expect(audit.metadata.after.passwordChanged).toBe(true);
     expect(JSON.stringify(audit.metadata)).not.toContain('new-secure-password');
 
+    // Analysts have PROFILES.VIEW only — account edits require PROFILES.EDIT.
     const denied = await request(app)
       .patch(`/api/v1/admin/profiles/${member.id}/account`)
-      .set(bearer((await createStaff('MODERATOR')).token))
-      .send({ reason: 'Moderator attempt', phoneNumber: '+919999988866' });
+      .set(bearer((await createStaff('ANALYST')).token))
+      .send({ reason: 'Analyst attempt', phoneNumber: '+919999988866' });
     expect(denied.status).toBe(403);
   });
 

@@ -78,7 +78,8 @@ export const SYSTEM_ROLE_DEFINITIONS = [
     rank: ROLE_RANKS.ADMIN,
     permissions: matrix({
       ...allModules(ALL),
-      ROLES: READ_WRITE,
+      // DELETE allowed for custom roles only — system role deletion stays blocked in adminRoles.service.
+      ROLES: ALL,
       STAFF: READ_WRITE,
     }),
   },
@@ -95,6 +96,7 @@ export const SYSTEM_ROLE_DEFINITIONS = [
       REPORTS: MODERATE,
       VERIFICATIONS: MODERATE,
       MATCHES: READ,
+      SWIPES: READ,
       MESSAGING: READ,
       BLOCKS: READ,
       SUPPORT: MODERATE,

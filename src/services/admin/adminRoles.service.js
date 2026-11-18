@@ -19,6 +19,30 @@ import {
 } from '../rbac.service.js';
 import { assertStaffTwoFactor } from './staffSecurity.service.js';
 
+// ROLES.* on the route is the auth gate. Rank only enforces hierarchy / Super Admin protection.
+async function assertCanMutateRole(actor, role) {
+  const actorRank = await getRankForRole(actor.role);
+  if (actorRank <= 0) throw ApiError.forbidden();
+
+  if (role.slug === 'SUPER_ADMIN' && actor.role !== 'SUPER_ADMIN') {
+    throw ApiError.forbidden('Only a Super Admin can manage the Super Admin role.');
+  }
+
+  if (actor.role === 'SUPER_ADMIN') return actorRank;
+
+  // System roles at or below the actor (e.g. ADMIN → MODERATOR) are editable.
+  // Custom roles must sit strictly below the actor's rank.
+  if (role.isSystem) {
+    if (role.rank > actorRank) {
+      throw ApiError.forbidden('You cannot manage a role with higher privilege.');
+    }
+  } else if (role.rank >= actorRank) {
+    throw ApiError.forbidden('You cannot manage a role with equal or higher privilege.');
+  }
+
+  return actorRank;
+}
+
 function presentRole(role, staffCount = 0) {
   return {
     id: role._id,
@@ -108,7 +132,7 @@ export async function createRole(actor, input) {
   await assertStaffTwoFactor(actor, input.twoFactorCode);
   await ensureSystemRoles();
   const actorRank = await getRankForRole(actor.role);
-  if (actorRank < 80) throw ApiError.forbidden();
+  if (actorRank <= 0) throw ApiError.forbidden();
 
   const rank = Math.min(input.rank ?? 20, MAX_CUSTOM_ROLE_RANK, actorRank - 1);
   if (rank < 1) throw ApiError.validation([{ field: 'rank', reason: 'OUT_OF_RANGE' }]);
@@ -141,12 +165,7 @@ export async function updateRole(actor, roleId, input) {
   const role = await AdminRole.findById(roleId);
   if (!role) throw ApiError.notFound();
 
-  const actorRank = await getRankForRole(actor.role);
-  if (actorRank < 80) throw ApiError.forbidden();
-  if (role.isSystem && actor.role !== 'SUPER_ADMIN' && actor.role !== 'ADMIN') throw ApiError.forbidden();
-  if (role.slug === 'SUPER_ADMIN' && actor.role !== 'SUPER_ADMIN') {
-    throw ApiError.forbidden('Only a Super Admin can edit the Super Admin role.');
-  }
+  const actorRank = await assertCanMutateRole(actor, role);
 
   const before = { name: role.name, description: role.description, rank: role.rank, isActive: role.isActive };
 
@@ -181,12 +200,9 @@ export async function updateRolePermissions(actor, roleId, { permissions, twoFac
   const role = await AdminRole.findById(roleId);
   if (!role) throw ApiError.notFound();
 
-  const actorRank = await getRankForRole(actor.role);
-  if (actorRank < 80) throw ApiError.forbidden();
-  if (role.slug === 'SUPER_ADMIN' && actor.role !== 'SUPER_ADMIN') {
-    throw ApiError.forbidden('Only a Super Admin can change Super Admin permissions.');
-  }
-  if (role.isSystem && role.slug === 'SUPER_ADMIN') {
+  await assertCanMutateRole(actor, role);
+
+  if (role.slug === 'SUPER_ADMIN') {
     // Super Admin always keeps full access — ignore attempts to strip.
     throw ApiError.conflict('Super Admin permissions are fixed.');
   }
@@ -214,9 +230,7 @@ export async function deleteRole(actor, roleId, { twoFactorCode } = {}) {
   if (!role) throw ApiError.notFound();
   if (role.isSystem) throw ApiError.conflict('System roles cannot be deleted.');
 
-  const actorRank = await getRankForRole(actor.role);
-  if (actorRank < 80) throw ApiError.forbidden();
-  if (role.rank >= actorRank) throw ApiError.forbidden();
+  await assertCanMutateRole(actor, role);
 
   const assigned = await User.countDocuments({ role: role.slug });
   if (assigned > 0) throw ApiError.conflict('Reassign staff before deleting this role.');

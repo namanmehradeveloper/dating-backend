@@ -94,6 +94,16 @@ export function requirePermission(module, action) {
   };
 }
 
+// Allows the request when the caller has any one of the listed module/action pairs.
+export function requireAnyPermission(...requirements) {
+  return function checkAnyPermission(req, res, next) {
+    if (!req.user) throw ApiError.unauthenticated();
+    const allowed = requirements.some(([module, action]) => hasPermission(req.user.permissions, module, action));
+    if (!allowed) throw ApiError.forbidden();
+    next();
+  };
+}
+
 // ADMIN and SUPER_ADMIN (and any future role with rank >= ADMIN).
 export function requireMinRank(minRole) {
   return async function checkMinRank(req, res, next) {

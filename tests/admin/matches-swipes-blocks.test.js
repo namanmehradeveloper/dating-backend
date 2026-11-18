@@ -80,8 +80,15 @@ describe('admin matches, swipes and blocks', () => {
     const b = await createMember();
     const match = await matchMembers(app, a, b);
 
-    const deniedConfig = await request(app).get('/api/v1/admin/matches/config').set(bearer(moderator.token));
-    expect(deniedConfig.status).toBe(403);
+    // Moderators may VIEW match config; EDIT remains ADMIN+ per matrix.
+    const viewedConfig = await request(app).get('/api/v1/admin/matches/config').set(bearer(moderator.token));
+    expect(viewedConfig.status).toBe(200);
+
+    const deniedEdit = await request(app)
+      .patch('/api/v1/admin/matches/config')
+      .set(bearer(moderator.token))
+      .send({ matchExpiryDays: 14, matchFraudNewMatchesPerDay: 10 });
+    expect(deniedEdit.status).toBe(403);
 
     const config = await request(app).get('/api/v1/admin/matches/config').set(bearer(admin.token));
     expect(config.status).toBe(200);
@@ -125,8 +132,15 @@ describe('admin matches, swipes and blocks', () => {
     expect(stats.body.data.likes).toBeGreaterThanOrEqual(1);
     expect(stats.body.data.passes).toBeGreaterThanOrEqual(1);
 
-    const denied = await request(app).get(`/api/v1/admin/swipes?userId=${a.id}`).set(bearer(moderator.token));
-    expect(denied.status).toBe(403);
+    // Moderators have SWIPES.VIEW, so list is allowed; analysts without EDIT still cannot patch entitlements.
+    const listAsMod = await request(app).get(`/api/v1/admin/swipes?userId=${a.id}`).set(bearer(moderator.token));
+    expect(listAsMod.status).toBe(200);
+
+    const deniedEntitlementEdit = await request(app)
+      .patch('/api/v1/admin/swipes/entitlements')
+      .set(bearer(moderator.token))
+      .send({ freeDailyRewinds: 9 });
+    expect(deniedEntitlementEdit.status).toBe(403);
 
     const missing = await request(app).get('/api/v1/admin/swipes').set(bearer(admin.token));
     expect(missing.status).toBe(400);
@@ -209,7 +223,9 @@ describe('admin matches, swipes and blocks', () => {
     expect(report.body.data.totals.blocksSent).toBe(1);
     expect(report.body.data.totals.blocksReceived).toBe(1);
 
-    expect((await request(app).get('/api/v1/admin/blocks/velocity').set(bearer(moderator.token))).status).toBe(403);
+    expect((await request(app).get('/api/v1/admin/blocks/velocity').set(bearer(moderator.token))).status).toBe(200);
+    const support = await createStaff('SUPPORT_AGENT');
+    expect((await request(app).get('/api/v1/admin/blocks/velocity').set(bearer(support.token))).status).toBe(403);
     const velocity = await request(app).get('/api/v1/admin/blocks/velocity').set(bearer(admin.token));
     expect(velocity.status).toBe(200);
     expect(velocity.body.data).toHaveProperty('threshold');

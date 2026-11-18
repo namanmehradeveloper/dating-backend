@@ -22,28 +22,66 @@ export function isAdminTier(role) {
   return ADMIN_TIER_ROLES.includes(role);
 }
 
-// Idempotent seed. Re-checks the DB so test wipes (and fresh deploys) still get system roles.
-export async function ensureSystemRoles() {
-  const existing = await AdminRole.countDocuments({ isSystem: true });
-  if (existing >= SYSTEM_ROLE_DEFINITIONS.length) return;
+let ensureSystemRolesInflight = null;
 
-  for (const definition of SYSTEM_ROLE_DEFINITIONS) {
-    await AdminRole.updateOne(
-      { slug: definition.slug },
-      {
-        $set: {
-          name: definition.name,
-          description: definition.description,
-          isSystem: true,
-          isActive: true,
-          rank: definition.rank,
-          permissions: definition.permissions,
+// Idempotent seed. Re-checks the DB so test wipes (and fresh deploys) still get system roles.
+// Super Admin permissions are always forced to the full catalog matrix.
+// Other system roles: catalog defaults only on insert (or empty matrix). Intentional edits are kept.
+// Concurrent callers share one in-flight seed to avoid VersionError races.
+export async function ensureSystemRoles() {
+  if (ensureSystemRolesInflight) return ensureSystemRolesInflight;
+
+  ensureSystemRolesInflight = (async () => {
+    for (const definition of SYSTEM_ROLE_DEFINITIONS) {
+      if (definition.slug === 'SUPER_ADMIN') {
+        await AdminRole.updateOne(
+          { slug: definition.slug },
+          {
+            $set: {
+              name: definition.name,
+              description: definition.description,
+              isSystem: true,
+              isActive: true,
+              rank: definition.rank,
+              permissions: definition.permissions,
+            },
+            $setOnInsert: { slug: definition.slug },
+          },
+          { upsert: true },
+        );
+        continue;
+      }
+
+      const existing = await AdminRole.findOne({ slug: definition.slug }).lean();
+      const storedCount = existing?.permissions?.length ?? 0;
+      // Only seed/repair when the role is missing or has an empty matrix — never overwrite
+      // intentional permission edits (including reduced system-role matrices).
+      const needsPermissionSeed = !existing || storedCount === 0;
+
+      await AdminRole.updateOne(
+        { slug: definition.slug },
+        {
+          $set: {
+            name: definition.name,
+            description: definition.description,
+            isSystem: true,
+            isActive: true,
+            rank: definition.rank,
+            ...(needsPermissionSeed ? { permissions: definition.permissions } : {}),
+          },
+          $setOnInsert: {
+            slug: definition.slug,
+            ...(needsPermissionSeed ? {} : { permissions: definition.permissions }),
+          },
         },
-        $setOnInsert: { slug: definition.slug },
-      },
-      { upsert: true },
-    );
-  }
+        { upsert: true },
+      );
+    }
+  })().finally(() => {
+    ensureSystemRolesInflight = null;
+  });
+
+  return ensureSystemRolesInflight;
 }
 
 export async function isStaffRole(role) {
