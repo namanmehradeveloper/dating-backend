@@ -94,6 +94,19 @@ function isConversationHiddenFor(conversation, userId) {
   return Array.isArray(conversation.hiddenFor) && conversation.hiddenFor.includes(userId);
 }
 
+// After a new message: bump activity and un-hide only for the recipient.
+// The sender's "Delete chat" state is left untouched so a self-send cannot
+// resurrect their own hidden inbox entry; the other member's hide is never shared.
+async function revealConversationForRecipient(conversationId, message, recipientId) {
+  await Conversation.updateOne(
+    { _id: conversationId },
+    {
+      $set: { lastMessageId: message._id, lastActivityAt: message.sentAt },
+      $pull: { hiddenFor: recipientId },
+    },
+  );
+}
+
 // Loads a conversation the member takes part in. Anyone else gets 404.
 export async function loadParticipantConversation(userId, conversationId) {
   const conversation = await Conversation.findOne({ _id: conversationId, participantIds: userId });
@@ -313,13 +326,8 @@ export async function recordCallMessage(callDoc) {
   if (isNew) {
     const conversation = await Conversation.findById(conversationId);
     if (conversation) {
-      await Conversation.updateOne(
-        { _id: conversationId },
-        {
-          $set: { lastMessageId: message._id, lastActivityAt: message.sentAt },
-          $pull: { hiddenFor: { $in: conversation.participantIds } },
-        },
-      );
+      const recipientId = otherParticipant(conversation, callerId);
+      await revealConversationForRecipient(conversationId, message, recipientId);
       for (const participantId of conversation.participantIds) {
         emitToUser(participantId, 'message:new', { message: presented });
       }
@@ -405,15 +413,10 @@ export async function sendMessage(
 
   const presented = presentMessage(message);
   if (isNew) {
-    // A new message brings the chat back for anyone who had deleted it for themselves.
-    await Conversation.updateOne(
-      { _id: conversationId },
-      {
-        $set: { lastMessageId: message._id, lastActivityAt: message.sentAt },
-        $pull: { hiddenFor: { $in: conversation.participantIds } },
-      },
-    );
+    // Bring the thread back only for the recipient who had "Delete chat"'d it.
+    // Sender's hiddenFor entry (if any) is preserved; messages are never deleted.
     const recipientId = otherParticipant(conversation, userId);
+    await revealConversationForRecipient(conversationId, message, recipientId);
     for (const participantId of conversation.participantIds) {
       emitToUser(participantId, 'message:new', { message: presented });
     }

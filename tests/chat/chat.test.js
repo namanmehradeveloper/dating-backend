@@ -219,7 +219,7 @@ describe('chat REST', () => {
   });
 
   it('deletes a chat for the current member only and restores it on a new message', async () => {
-    await sendMessage(alex, match.conversationId, 'Keep me');
+    const kept = (await sendMessage(alex, match.conversationId, 'Keep me')).body.data;
 
     const deleted = await request(app).delete(`/api/v1/conversations/${match.conversationId}`).set(bearer(alex.token));
     expect(deleted.status).toBe(200);
@@ -227,10 +227,41 @@ describe('chat REST', () => {
 
     expect((await request(app).get('/api/v1/conversations').set(bearer(alex.token))).body.data.items).toEqual([]);
     expect((await request(app).get(`/api/v1/conversations/${match.conversationId}`).set(bearer(alex.token))).status).toBe(404);
-    expect((await request(app).get('/api/v1/conversations').set(bearer(avery.token))).body.data.items).toHaveLength(1);
+    expect((await request(app).get(`/api/v1/conversations/${match.conversationId}/messages`).set(bearer(alex.token))).status).toBe(404);
 
-    await sendMessage(avery, match.conversationId, 'Bring it back');
+    const averyList = await request(app).get('/api/v1/conversations').set(bearer(avery.token));
+    expect(averyList.body.data.items).toHaveLength(1);
+    expect(
+      (await request(app).get(`/api/v1/conversations/${match.conversationId}/messages`).set(bearer(avery.token))).body.data.items.map(
+        (message) => message.id,
+      ),
+    ).toContain(kept.id);
+
+    const incoming = (await sendMessage(avery, match.conversationId, 'Bring it back')).body.data;
+
+    const alexList = await request(app).get('/api/v1/conversations').set(bearer(alex.token));
+    expect(alexList.body.data.items).toHaveLength(1);
+    expect(alexList.body.data.items[0].id).toBe(match.conversationId);
+    expect(alexList.body.data.items[0].unreadCount).toBeGreaterThanOrEqual(1);
+    expect(alexList.body.data.items[0].lastMessage?.id).toBe(incoming.id);
+
+    // Same conversation id — no duplicate thread — and prior history is intact.
+    const history = (
+      await request(app).get(`/api/v1/conversations/${match.conversationId}/messages`).set(bearer(alex.token))
+    ).body.data.items;
+    expect(history.map((message) => message.id)).toEqual(expect.arrayContaining([kept.id, incoming.id]));
+    expect(history.map((message) => message.text)).toEqual(expect.arrayContaining(['Keep me', 'Bring it back']));
+  });
+
+  it('does not resurrect the sender\'s own deleted chat when they send a message', async () => {
+    await sendMessage(alex, match.conversationId, 'before hide');
+    expect((await request(app).delete(`/api/v1/conversations/${match.conversationId}`).set(bearer(alex.token))).status).toBe(200);
+    expect((await request(app).delete(`/api/v1/conversations/${match.conversationId}`).set(bearer(avery.token))).status).toBe(200);
+
+    await sendMessage(avery, match.conversationId, 'only the receiver should see this');
+
     expect((await request(app).get('/api/v1/conversations').set(bearer(alex.token))).body.data.items).toHaveLength(1);
+    expect((await request(app).get('/api/v1/conversations').set(bearer(avery.token))).body.data.items).toEqual([]);
   });
 
   it('deletes a message for the current member only', async () => {
