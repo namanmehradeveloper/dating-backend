@@ -15,6 +15,12 @@ router.delete('/devices/:deviceId', requireAuth, notificationController.removeDe
 // GET /api/v1/notifications — notification inbox, newest first.
 router.get('/notifications', requireAuth, notificationController.listNotifications);
 
+// GET /api/v1/notifications/unread-count — own unread total.
+router.get('/notifications/unread-count', requireAuth, notificationController.unreadCount);
+
+// POST /api/v1/notifications/read-all — mark every own unread notification as read.
+router.post('/notifications/read-all', requireAuth, notificationController.markAllRead);
+
 // POST /api/v1/notifications/:notificationId/read — mark one notification as read.
 router.post('/notifications/:notificationId/read', requireAuth, notificationController.markRead);
 

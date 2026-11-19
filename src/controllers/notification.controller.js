@@ -22,6 +22,16 @@ export async function listNotifications(req, res) {
   return ApiResponse.ok(res, await notificationService.listNotifications(req.user.id, parsePagination(req.query)));
 }
 
+// GET /notifications/unread-count — own unread total.
+export async function unreadCount(req, res) {
+  return ApiResponse.ok(res, await notificationService.countUnread(req.user.id));
+}
+
+// POST /notifications/read-all — mark every own unread notification as read.
+export async function markAllRead(req, res) {
+  return ApiResponse.ok(res, await notificationService.markAllRead(req.user.id));
+}
+
 // POST /notifications/:notificationId/read — mark one notification read.
 export async function markRead(req, res) {
   await notificationService.markNotificationRead(req.user.id, req.params.notificationId);

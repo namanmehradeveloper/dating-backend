@@ -578,6 +578,7 @@ async function applyStatusSideEffects(actor, userId, status) {
       type: 'SYSTEM',
       title: 'Account warning',
       body: 'Your account received a warning for breaking our community guidelines.',
+      data: { kind: 'ADMIN_WARNING', destination: 'account' },
     });
   }
 }

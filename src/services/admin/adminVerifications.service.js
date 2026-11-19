@@ -143,8 +143,16 @@ export async function reviewVerification(actor, verificationId, { status, reason
   await notifyUser(request.userId, {
     type: 'VERIFICATION_RESULT',
     title: isApproved ? 'You are verified' : 'Verification not approved',
-    body: isApproved ? 'Your profile now shows the verified badge.' : 'Your selfie could not be verified. You can try again.',
-    data: { status },
+    body: isApproved
+      ? 'Your profile now shows the verified badge.'
+      : (reason
+        ? `Your selfie could not be verified: ${reason}`
+        : 'Your selfie could not be verified. You can try again.'),
+    data: {
+      status,
+      ...(reason ? { reason: String(reason) } : {}),
+      destination: 'profile_verify',
+    },
   });
   await recordAudit(actor, {
     action: 'VERIFICATION_REVIEWED',

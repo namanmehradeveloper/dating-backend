@@ -1,11 +1,12 @@
 // Support desk for staff: list and read tickets, change their status and reply to members.
 
-import { SupportTicket } from '../../models/SupportTicket.js';
+import { GUEST_AUTHOR_ID, SupportTicket } from '../../models/SupportTicket.js';
 import { ApiError } from '../../utils/ApiError.js';
 import { buildPage, getAfterCursorFilter, getPageSort } from '../../utils/pagination.js';
 import { recordAudit } from '../audit.service.js';
 import { notifyUser } from '../notification.service.js';
 import { loadUserCards } from './adminPresenter.js';
+
 
 // Shapes one ticket row.
 function presentTicketSummary(ticket, cardFor) {
@@ -15,7 +16,9 @@ function presentTicketSummary(ticket, cardFor) {
     category: ticket.category,
     subject: ticket.subject,
     status: ticket.status,
-    user: cardFor(ticket.userId),
+    contactName: ticket.contactName ?? null,
+    contactEmail: ticket.contactEmail ?? null,
+    user: ticket.userId ? cardFor(ticket.userId) : null,
     messageCount: ticket.messages.length,
     lastMessageAt: lastMessage?.createdAt ?? ticket.createdAt,
     lastMessageAuthor: lastMessage?.author ?? null,
@@ -31,11 +34,17 @@ export async function listTickets(filters, { limit, cursor }) {
   if (filters.category) query.category = filters.category;
   if (filters.q) {
     const pattern = new RegExp(filters.q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
-    query.$or = [{ subject: pattern }, { _id: filters.q }, { userId: filters.q }];
+    query.$or = [
+      { subject: pattern },
+      { _id: filters.q },
+      { userId: filters.q },
+      { contactName: pattern },
+      { contactEmail: pattern },
+    ];
   }
   const docs = await SupportTicket.find({ ...query, ...getAfterCursorFilter(cursor) }).sort(getPageSort()).limit(limit + 1).lean();
   const page = buildPage(docs, limit);
-  const cardFor = await loadUserCards(page.items.map((ticket) => ticket.userId));
+  const cardFor = await loadUserCards(page.items.map((ticket) => ticket.userId).filter(Boolean));
   return { items: page.items.map((ticket) => presentTicketSummary(ticket, cardFor)), nextCursor: page.nextCursor };
 }
 
@@ -43,13 +52,14 @@ export async function listTickets(filters, { limit, cursor }) {
 export async function getTicket(ticketId) {
   const ticket = await SupportTicket.findById(ticketId).lean();
   if (!ticket) throw ApiError.notFound();
-  const cardFor = await loadUserCards([ticket.userId, ...ticket.messages.map((message) => message.authorId)]);
+  const authorIds = ticket.messages.map((message) => message.authorId).filter((id) => id && id !== GUEST_AUTHOR_ID);
+  const cardFor = await loadUserCards([ticket.userId, ...authorIds].filter(Boolean));
   return {
     ...presentTicketSummary(ticket, cardFor),
     messages: ticket.messages.map((message) => ({
       id: message._id,
       author: message.author,
-      authorUser: cardFor(message.authorId),
+      authorUser: message.authorId === GUEST_AUTHOR_ID ? null : cardFor(message.authorId),
       body: message.body,
       createdAt: message.createdAt,
     })),
@@ -78,12 +88,20 @@ export async function replyToTicket(actor, ticketId, { body }) {
   if (ticket.status === 'OPEN') ticket.status = 'IN_PROGRESS';
   await ticket.save();
 
-  await notifyUser(ticket.userId, {
-    type: 'SYSTEM',
-    title: 'Support replied',
-    body: 'Our support team replied to your request.',
-    data: { ticketId },
-  });
+  if (ticket.userId) {
+    const preview = body.length > 120 ? `${body.slice(0, 117)}…` : body;
+    await notifyUser(ticket.userId, {
+      type: 'SYSTEM',
+      title: 'Support replied',
+      body: preview,
+      data: {
+        kind: 'SUPPORT_REPLY',
+        ticketId,
+        ticketSubject: ticket.subject,
+        preview,
+      },
+    });
+  }
   await recordAudit(actor, { action: 'TICKET_REPLIED', targetType: 'SUPPORT_TICKET', targetId: ticketId, metadata: { status: ticket.status } });
   return getTicket(ticketId);
 }

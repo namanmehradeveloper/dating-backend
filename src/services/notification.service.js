@@ -1,14 +1,18 @@
 // Member notifications: inbox entries, preferences, devices, and the push hand-off.
-// Texts are generic on purpose ("You have a new message"), never message content or location.
+// Inbox rows may include short safe previews for the recipient only. Push stays generic-safe.
 
 import { Device } from '../models/Device.js';
 import { Notification } from '../models/Notification.js';
 import { NotificationPreference } from '../models/NotificationPreference.js';
+import { Profile } from '../models/Profile.js';
 import { ApiError } from '../utils/ApiError.js';
+import { buildFileUrl } from '../utils/fileUrls.js';
 import { buildPage, getAfterCursorFilter, getPageSort } from '../utils/pagination.js';
 import { sendPushToUser } from './push.service.js';
+import { emitToUser } from './realtime.service.js';
 
 const DEFAULT_PREFERENCES = { newMatches: true, messages: true, likes: true, promotions: false };
+const PREVIEW_MAX = 120;
 
 // Which preference switches off which notification type (null = always delivered).
 const PREFERENCE_BY_TYPE = {
@@ -18,6 +22,8 @@ const PREFERENCE_BY_TYPE = {
   VERIFICATION_RESULT: null,
   SYSTEM: null,
 };
+
+const UNREAD_FILTER = { $or: [{ readAt: null }, { readAt: { $exists: false } }] };
 
 // Returns a member's preferences, using the defaults when they never changed them.
 export async function getPreferences(userId) {
@@ -44,24 +50,49 @@ async function wantsNotification(userId, type, isPromotion) {
   return preferenceKey ? preferences[preferenceKey] : true;
 }
 
-// Normalizes notification `data` to string values (schema: Map of String). Never stores message text.
+// Truncates text for safe inbox/toast previews.
+export function truncatePreview(text, max = PREVIEW_MAX) {
+  const value = String(text || '').trim().replace(/\s+/g, ' ');
+  if (!value) return '';
+  return value.length > max ? `${value.slice(0, max - 3)}…` : value;
+}
+
+// Loads display name + first approved photo URL for notification enrichment.
+export async function loadNotificationActor(userId) {
+  const profile = await Profile.findOne({ userId }).select('displayName photos').lean();
+  const displayName = profile?.displayName || 'Dating Cloud member';
+  const approved = [...(profile?.photos || [])]
+    .filter((photo) => (photo.moderationStatus ?? 'APPROVED') === 'APPROVED')
+    .sort((a, b) => a.order - b.order)[0];
+  return {
+    displayName,
+    photoUrl: approved?.relativePath ? buildFileUrl(approved.relativePath) : '',
+  };
+}
+
+// Normalizes notification `data` to string values (schema: Map of String).
 function sanitizeNotificationData(data = {}) {
   const out = {};
   for (const [key, value] of Object.entries(data)) {
-    if (value == null) continue;
+    if (value == null || value === '') continue;
     out[key] = String(value);
   }
   return out;
 }
 
-// Notifies a member: stores an inbox entry and hands the notification to push.
-// NEW_MESSAGE rows are deduped by data.messageId when present. Bodies stay generic (no message text).
+// Notifies a member: stores an inbox entry, optional realtime emit, and push hand-off.
+// NEW_MESSAGE rows are deduped by data.messageId when present.
+// Mass campaigns should use insertMany and must not call this with emitRealtime for every recipient.
 // Returns the inbox entry, or null when skipped by preferences.
-export async function notifyUser(userId, { type, title, body, data = {}, campaignId, isPromotion = false }) {
+export async function notifyUser(
+  userId,
+  { type, title, body, data = {}, campaignId, isPromotion = false, emitRealtime = true },
+) {
   if (!(await wantsNotification(userId, type, isPromotion))) return null;
 
   const safeData = sanitizeNotificationData(data);
   let notification = null;
+  let created = false;
 
   if (type === 'NEW_MESSAGE' && safeData.messageId) {
     notification = await Notification.findOne({
@@ -78,6 +109,7 @@ export async function notifyUser(userId, { type, title, body, data = {}, campaig
         data: safeData,
         campaignId,
       });
+      created = true;
     }
   } else {
     notification = await Notification.create({
@@ -88,17 +120,23 @@ export async function notifyUser(userId, { type, title, body, data = {}, campaig
       data: safeData,
       campaignId,
     });
+    created = true;
+  }
+
+  const presented = presentNotification(notification);
+  if (created && emitRealtime) {
+    emitToUser(userId, 'notification:new', { notification: presented });
   }
 
   await sendPushToUser(userId, { type, title, body, data: safeData });
-  return notification;
+  return presented;
 }
 
 // Shapes an inbox entry for the API.
 function presentNotification(notification) {
   const data = notification.data instanceof Map ? Object.fromEntries(notification.data) : (notification.data ?? {});
   return {
-    id: notification._id,
+    id: notification._id || notification.id,
     type: notification.type,
     title: notification.title,
     body: notification.body,
@@ -126,6 +164,22 @@ export async function markNotificationRead(userId, notificationId) {
     notification.readAt = new Date();
     await notification.save();
   }
+  return presentNotification(notification);
+}
+
+// GET /notifications/unread-count — own unread only.
+export async function countUnread(userId) {
+  const count = await Notification.countDocuments({ userId, ...UNREAD_FILTER });
+  return { count };
+}
+
+// POST /notifications/read-all — marks every unread notification owned by this member.
+export async function markAllRead(userId) {
+  const result = await Notification.updateMany(
+    { userId, ...UNREAD_FILTER },
+    { $set: { readAt: new Date() } },
+  );
+  return { updated: result.modifiedCount ?? 0 };
 }
 
 // Registers (or moves) a push token to this member's device list.

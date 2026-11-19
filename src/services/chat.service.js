@@ -12,7 +12,7 @@ import { buildFileUrl } from '../utils/fileUrls.js';
 import { buildPage, getAfterCursorFilter, getPageSort } from '../utils/pagination.js';
 import { isVisibleMember } from './accountStatus.service.js';
 import { getBlockedUserIds, hasBlocked, isBlockedEitherWay } from './block.service.js';
-import { notifyUser } from './notification.service.js';
+import { loadNotificationActor, notifyUser, truncatePreview } from './notification.service.js';
 import { toPublicProfiles } from './profilePresenter.js';
 import { allowsOnlineStatus, resolveVisiblePresence } from './presence.service.js';
 import { emitToUser } from './realtime.service.js';
@@ -420,18 +420,55 @@ export async function sendMessage(
     for (const participantId of conversation.participantIds) {
       emitToUser(participantId, 'message:new', { message: presented });
     }
-    // Inbox + push for the recipient only. Payload ids only — never message text.
-    await notifyUser(recipientId, {
-      type: 'NEW_MESSAGE',
-      title: gift ? 'New gift' : paidEmojiSnapshot ? 'New emoji' : 'New message',
-      body: gift ? 'You received a gift.' : paidEmojiSnapshot ? 'You received an emoji.' : 'You have a new message.',
-      data: {
-        conversationId,
-        messageId: presented.id,
-        senderId: userId,
-        receiverId: recipientId,
-      },
-    });
+    // Inbox + push for the recipient only. Short safe preview for the recipient's own inbox.
+    const actor = await loadNotificationActor(userId);
+    let messageKind = 'TEXT';
+    let preview = truncatePreview(presented.text);
+    let title = 'New message';
+    let body = preview || 'You have a new message.';
+
+    if (gift) {
+      messageKind = 'GIFT';
+      const giftLabel = gift.emoji ? `${gift.emoji} ${gift.title}` : gift.title;
+      preview = truncatePreview(`Sent you ${giftLabel}`);
+      title = 'New gift';
+      body = preview;
+    } else if (paidEmojiSnapshot) {
+      messageKind = 'EMOJI';
+      preview = truncatePreview(`Sent you ${paidEmojiSnapshot.emoji || 'a special emoji'}`);
+      title = 'New emoji';
+      body = preview;
+    } else if (presented.attachment) {
+      messageKind = 'PHOTO';
+      preview = 'Sent you a photo.';
+      body = preview;
+    } else if (!preview) {
+      preview = 'You have a new message.';
+      body = preview;
+    }
+
+    const data = {
+      conversationId,
+      messageId: presented.id,
+      senderId: userId,
+      receiverId: recipientId,
+      senderDisplayName: actor.displayName,
+      preview,
+      messageKind,
+    };
+    if (actor.photoUrl) data.senderPhotoUrl = actor.photoUrl;
+    if (gift) {
+      data.giftItemId = gift.itemId;
+      data.giftTitle = gift.title;
+      if (gift.emoji) data.giftEmoji = gift.emoji;
+      if (gift.imageUrl) data.giftImageUrl = gift.imageUrl;
+    }
+    if (paidEmojiSnapshot) {
+      data.paidEmoji = paidEmojiSnapshot.emoji;
+      data.paidEmojiPackId = paidEmojiSnapshot.packId;
+    }
+
+    await notifyUser(recipientId, { type: 'NEW_MESSAGE', title, body, data });
   }
   return presented;
 }

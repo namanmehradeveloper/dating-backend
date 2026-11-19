@@ -30,7 +30,15 @@ describe('admin notifications', () => {
     expect(res.body.data).toMatchObject({ audience: 'ALL_USERS', recipientCount: 2, pushStatus: 'FEATURE_NOT_CONFIGURED', createdBy: { id: admin.id } });
 
     const inbox = await request(app).get('/api/v1/notifications').set(bearer(first.token));
-    expect(inbox.body.data.items).toEqual([expect.objectContaining({ type: 'SYSTEM', title: 'New feature', data: { campaignId: res.body.data.id } })]);
+    expect(inbox.body.data.items).toEqual([expect.objectContaining({
+      type: 'SYSTEM',
+      title: 'New feature',
+      data: {
+        campaignId: res.body.data.id,
+        campaignType: 'ANNOUNCEMENT',
+        kind: 'ADMIN_ANNOUNCEMENT',
+      },
+    })]);
     expect(await Notification.countDocuments({ userId: second.id })).toBe(1);
     expect(await AuditLog.findOne({ action: 'NOTIFICATION_SENT' })).toMatchObject({ actorId: admin.id, targetId: res.body.data.id });
 

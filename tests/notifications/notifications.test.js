@@ -54,7 +54,7 @@ describe('devices', () => {
 describe('notification inbox', () => {
   useTestDatabase();
 
-  it('stores NEW_LIKE and NEW_MATCH notifications with generic text', async () => {
+  it('stores NEW_LIKE and enriched NEW_MATCH notifications', async () => {
     const alex = await createMember();
     const avery = await createMember();
     await swipe(app, alex, avery.id, 'LIKE');
@@ -69,24 +69,35 @@ describe('notification inbox', () => {
       id: expect.stringMatching(/^ntf_/),
       type: 'NEW_MATCH',
       title: expect.any(String),
-      body: expect.any(String),
-      data: { matchId: match.id },
+      body: expect.stringContaining('matched'),
+      data: {
+        matchId: match.id,
+        otherUserId: alex.id,
+        otherDisplayName: expect.any(String),
+        conversationId: match.conversationId,
+      },
       createdAt: expect.any(String),
       readAt: null,
     });
+    const likeNotification = res.body.data.items.find((item) => item.type === 'NEW_LIKE');
+    expect(likeNotification.data).toMatchObject({ destination: 'matches_received' });
+    expect(likeNotification.body).toBe('Someone new liked your profile.');
   });
 
-  it('stores NEW_MESSAGE inbox rows with ids only and dedupes by messageId', async () => {
+  it('stores NEW_MESSAGE inbox rows with preview fields and dedupes by messageId', async () => {
     const member = await createMember();
     const payload = {
       type: 'NEW_MESSAGE',
       title: 'New message',
-      body: 'You have a new message.',
+      body: 'Hello there',
       data: {
         conversationId: 'cnv_test1',
         messageId: 'msg_test1',
         senderId: 'usr_sender',
         receiverId: member.id,
+        senderDisplayName: 'Alex',
+        preview: 'Hello there',
+        messageKind: 'TEXT',
       },
     };
 
@@ -101,17 +112,37 @@ describe('notification inbox', () => {
       id: expect.stringMatching(/^ntf_/),
       type: 'NEW_MESSAGE',
       title: 'New message',
-      body: 'You have a new message.',
+      body: 'Hello there',
       data: {
         conversationId: 'cnv_test1',
         messageId: 'msg_test1',
         senderId: 'usr_sender',
         receiverId: member.id,
+        senderDisplayName: 'Alex',
+        preview: 'Hello there',
+        messageKind: 'TEXT',
       },
       createdAt: expect.any(String),
       readAt: null,
     });
-    expect(JSON.stringify(row)).not.toMatch(/secret chat text/i);
+  });
+
+  it('returns unread count and marks all read for the owner only', async () => {
+    const member = await createMember();
+    const other = await createMember();
+    await notifyUser(member.id, { type: 'SYSTEM', title: 'One', body: 'Body', data: { kind: 'ADMIN_ANNOUNCEMENT' } });
+    await notifyUser(member.id, { type: 'SYSTEM', title: 'Two', body: 'Body', data: { kind: 'ADMIN_WARNING' } });
+    await notifyUser(other.id, { type: 'SYSTEM', title: 'Other', body: 'Body' });
+
+    const count = await request(app).get('/api/v1/notifications/unread-count').set(bearer(member.token));
+    expect(count.status).toBe(200);
+    expect(count.body.data).toEqual({ count: 2 });
+
+    const marked = await request(app).post('/api/v1/notifications/read-all').set(bearer(member.token));
+    expect(marked.status).toBe(200);
+    expect(marked.body.data.updated).toBe(2);
+    expect((await request(app).get('/api/v1/notifications/unread-count').set(bearer(member.token))).body.data.count).toBe(0);
+    expect((await request(app).get('/api/v1/notifications/unread-count').set(bearer(other.token))).body.data.count).toBe(1);
   });
 
   it('paginates and marks notifications read', async () => {

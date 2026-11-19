@@ -11,7 +11,7 @@ import { newId } from '../utils/ids.js';
 import { buildPage, getAfterCursorFilter, getPageSort } from '../utils/pagination.js';
 import { isVisibleMember } from './accountStatus.service.js';
 import { getBlockedUserIds, isBlockedEitherWay } from './block.service.js';
-import { notifyUser } from './notification.service.js';
+import { loadNotificationActor, notifyUser } from './notification.service.js';
 import { toPublicProfile, toPublicProfiles } from './profilePresenter.js';
 import { emitToUser } from './realtime.service.js';
 import { loadInterestLabels } from './interest.service.js';
@@ -113,8 +113,38 @@ async function announceNewMatch(match, swiperId) {
   if (await isBlockedEitherWay(swiperId, recipientId)) return;
 
   emitToUser(recipientId, 'match:new', { match: await presentMatchFor(match, recipientId) });
-  const notification = { type: 'NEW_MATCH', title: 'It\'s a match!', body: 'You have a new match. Say hello!', data: { matchId: match._id } };
-  await Promise.all([notifyUser(recipientId, notification), notifyUser(swiperId, notification)]);
+
+  const [forRecipient, forSwiper] = await Promise.all([
+    loadNotificationActor(swiperId),
+    loadNotificationActor(recipientId),
+  ]);
+
+  await Promise.all([
+    notifyUser(recipientId, {
+      type: 'NEW_MATCH',
+      title: 'It\'s a match!',
+      body: `You matched with ${forRecipient.displayName}. Say hello!`,
+      data: {
+        matchId: match._id,
+        otherUserId: swiperId,
+        otherDisplayName: forRecipient.displayName,
+        ...(forRecipient.photoUrl ? { otherPhotoUrl: forRecipient.photoUrl } : {}),
+        conversationId: match.conversationId || '',
+      },
+    }),
+    notifyUser(swiperId, {
+      type: 'NEW_MATCH',
+      title: 'It\'s a match!',
+      body: `You matched with ${forSwiper.displayName}. Say hello!`,
+      data: {
+        matchId: match._id,
+        otherUserId: recipientId,
+        otherDisplayName: forSwiper.displayName,
+        ...(forSwiper.photoUrl ? { otherPhotoUrl: forSwiper.photoUrl } : {}),
+        conversationId: match.conversationId || '',
+      },
+    }),
+  ]);
 }
 
 // Creates the match and conversation for a mutual like. Exactly one match and one conversation

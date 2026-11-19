@@ -57,12 +57,17 @@ async function keepPromotionSubscribers(userIds) {
 // Writes the inbox entries in batches.
 async function createInboxEntries(campaign, userIds) {
   for (let start = 0; start < userIds.length; start += INSERT_BATCH_SIZE) {
+    // Mass campaigns write inbox rows only — no notification:new fan-out (polling/recovery).
     const batch = userIds.slice(start, start + INSERT_BATCH_SIZE).map((userId) => ({
       userId,
       type: 'SYSTEM',
       title: campaign.title,
       body: campaign.body,
-      data: { campaignId: campaign._id },
+      data: {
+        kind: 'ADMIN_ANNOUNCEMENT',
+        campaignId: campaign._id,
+        campaignType: campaign.type,
+      },
       campaignId: campaign._id,
     }));
     await Notification.insertMany(batch);

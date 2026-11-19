@@ -42,14 +42,7 @@ export async function authenticateAccessToken(token) {
   return { user, tokenExpiresAt: new Date(payload.exp * 1000) };
 }
 
-// Verifies the access token and attaches the authenticated user to req.user.
-export async function requireAuth(req, res, next) {
-  const token = readBearerToken(req);
-  if (!token) throw ApiError.unauthenticated();
-
-  const { user } = await authenticateAccessToken(token);
-  await touchLastActive(user);
-
+function attachUser(req, user) {
   req.user = {
     id: user._id,
     role: user.role,
@@ -58,6 +51,28 @@ export async function requireAuth(req, res, next) {
     deletion: user.deletion,
     twoFactorEnabled: Boolean(user.twoFactor?.enabled),
   };
+}
+
+// Verifies the access token and attaches the authenticated user to req.user.
+export async function requireAuth(req, res, next) {
+  const token = readBearerToken(req);
+  if (!token) throw ApiError.unauthenticated();
+
+  const { user } = await authenticateAccessToken(token);
+  await touchLastActive(user);
+  attachUser(req, user);
+  next();
+}
+
+// Attaches req.user when a valid Bearer token is present; continues without auth when absent.
+// An invalid or expired token still fails with 401 (do not treat bad tokens as guests).
+export async function optionalAuth(req, res, next) {
+  const token = readBearerToken(req);
+  if (!token) return next();
+
+  const { user } = await authenticateAccessToken(token);
+  await touchLastActive(user);
+  attachUser(req, user);
   next();
 }
 

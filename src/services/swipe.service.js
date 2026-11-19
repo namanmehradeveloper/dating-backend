@@ -55,7 +55,12 @@ export async function recordSwipe(userId, { targetUserId, action }) {
 
   const likedBack = await Swipe.exists({ userId: targetUserId, targetUserId: userId, action: { $in: LIKE_ACTIONS } });
   if (!likedBack) {
-    await notifyUser(targetUserId, { type: 'NEW_LIKE', title: 'Someone likes you', body: 'Someone new liked your profile.' });
+    await notifyUser(targetUserId, {
+      type: 'NEW_LIKE',
+      title: 'Someone likes you',
+      body: 'Someone new liked your profile.',
+      data: { destination: 'matches_received', kind: 'NEW_LIKE' },
+    });
     return { swipeId: swipe._id, isMatch: false, match: null };
   }
 

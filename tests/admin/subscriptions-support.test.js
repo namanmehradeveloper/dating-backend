@@ -10,6 +10,13 @@ import { bearer, createMember, createStaff, grantPremium, useTestDatabase } from
 
 const app = createApp();
 
+async function memberWithEmail(overrides = {}) {
+  return createMember({
+    user: { email: `payer_${Date.now()}_${Math.random().toString(16).slice(2)}@example.test`, ...overrides.user },
+    profile: overrides.profile,
+  });
+}
+
 describe('admin subscriptions', () => {
   useTestDatabase();
 
@@ -42,29 +49,78 @@ describe('admin support', () => {
   useTestDatabase();
 
   // Opens a ticket as a member.
-  async function openTicket(member) {
+  async function openTicket(member, body = {}) {
     const res = await request(app)
       .post('/api/v1/support/tickets')
       .set(bearer(member.token))
-      .send({ category: 'BILLING', subject: 'Charged twice', message: 'I was charged twice this month.' });
+      .send({ category: 'BILLING', subject: 'Charged twice', message: 'I was charged twice this month.', ...body });
     return res.body.data;
   }
 
-  it('lists and shows tickets', async () => {
+  it('lists and shows tickets with contact details', async () => {
     const moderator = await createStaff('MODERATOR');
-    const member = await createMember({ profile: { displayName: 'Payer' } });
+    const member = await memberWithEmail({ profile: { displayName: 'Payer' } });
     const ticket = await openTicket(member);
 
     const list = await request(app).get('/api/v1/admin/support/tickets?status=OPEN&category=BILLING').set(bearer(moderator.token));
-    expect(list.body.data.items).toEqual([expect.objectContaining({ id: ticket.id, subject: 'Charged twice', messageCount: 1, user: expect.objectContaining({ displayName: 'Payer' }) })]);
+    expect(list.body.data.items).toEqual([
+      expect.objectContaining({
+        id: ticket.id,
+        subject: 'Charged twice',
+        messageCount: 1,
+        contactName: 'Payer',
+        contactEmail: member.user.email,
+        user: expect.objectContaining({ displayName: 'Payer' }),
+      }),
+    ]);
 
     const detail = await request(app).get(`/api/v1/admin/support/tickets/${ticket.id}`).set(bearer(moderator.token));
     expect(detail.body.data.messages).toEqual([expect.objectContaining({ author: 'USER', body: 'I was charged twice this month.' })]);
+    expect(detail.body.data.contactName).toBe('Payer');
+    expect(detail.body.data.contactEmail).toBe(member.user.email);
+  });
+
+  it('lists guest tickets and skips in-app notify on reply', async () => {
+    const moderator = await createStaff('MODERATOR');
+    const created = await request(app).post('/api/v1/support/tickets').send({
+      category: 'ACCOUNT',
+      subject: 'Need help signing in',
+      message: 'I cannot access my account anymore.',
+      name: 'Guest Ada',
+      email: 'ada.guest@example.test',
+    });
+    expect(created.status).toBe(201);
+
+    const list = await request(app).get('/api/v1/admin/support/tickets?q=ada.guest@example.test').set(bearer(moderator.token));
+    expect(list.body.data.items).toEqual([
+      expect.objectContaining({
+        id: created.body.data.id,
+        contactName: 'Guest Ada',
+        contactEmail: 'ada.guest@example.test',
+        user: null,
+      }),
+    ]);
+
+    const reply = await request(app)
+      .post(`/api/v1/admin/support/tickets/${created.body.data.id}/messages`)
+      .set(bearer(moderator.token))
+      .send({ body: 'Please try resetting your password.' });
+    expect(reply.status).toBe(201);
+    expect(reply.body.data.status).toBe('IN_PROGRESS');
+    expect(reply.body.data.user).toBeNull();
+    expect(await Notification.countDocuments({})).toBe(0);
+    expect(await AuditLog.exists({ action: 'TICKET_REPLIED', targetId: created.body.data.id })).toBeTruthy();
+
+    const closed = await request(app)
+      .patch(`/api/v1/admin/support/tickets/${created.body.data.id}`)
+      .set(bearer(moderator.token))
+      .send({ status: 'CLOSED' });
+    expect(closed.body.data.status).toBe('CLOSED');
   });
 
   it('replies as staff, notifies the member and hides staff identity from them', async () => {
     const moderator = await createStaff('MODERATOR');
-    const member = await createMember();
+    const member = await memberWithEmail();
     const ticket = await openTicket(member);
 
     const reply = await request(app).post(`/api/v1/admin/support/tickets/${ticket.id}/messages`).set(bearer(moderator.token)).send({ body: 'We refunded the second charge.' });
@@ -82,7 +138,7 @@ describe('admin support', () => {
 
   it('changes status, and refuses replies on closed tickets', async () => {
     const moderator = await createStaff('MODERATOR');
-    const ticket = await openTicket(await createMember());
+    const ticket = await openTicket(await memberWithEmail());
 
     const closed = await request(app).patch(`/api/v1/admin/support/tickets/${ticket.id}`).set(bearer(moderator.token)).send({ status: 'CLOSED' });
     expect(closed.body.data.status).toBe('CLOSED');

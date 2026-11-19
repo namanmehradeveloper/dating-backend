@@ -23,5 +23,7 @@ const notificationSchema = new mongoose.Schema(
 notificationSchema.index({ userId: 1, createdAt: -1 });
 // Speeds up NEW_MESSAGE dedupe by messageId in notifyUser.
 notificationSchema.index({ userId: 1, type: 1, 'data.messageId': 1 });
+// Speeds up unread-count and mark-all-read.
+notificationSchema.index({ userId: 1, readAt: 1 });
 
 export const Notification = mongoose.model('Notification', notificationSchema);

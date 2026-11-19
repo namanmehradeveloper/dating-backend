@@ -68,7 +68,7 @@ describe('chat REST', () => {
     });
   });
 
-  it('creates a NEW_MESSAGE inbox row for the recipient only (no message text)', async () => {
+  it('creates a NEW_MESSAGE inbox row for the recipient only with a short preview', async () => {
     const res = await sendMessage(alex, match.conversationId, 'Secret private text');
     expect(res.status).toBe(201);
     const messageId = res.body.data.id;
@@ -78,16 +78,20 @@ describe('chat REST', () => {
     expect(row).toMatchObject({
       type: 'NEW_MESSAGE',
       title: 'New message',
-      body: 'You have a new message.',
+      body: 'Secret private text',
       data: {
         conversationId: match.conversationId,
         messageId,
         senderId: alex.id,
         receiverId: avery.id,
+        preview: 'Secret private text',
+        messageKind: 'TEXT',
+        senderDisplayName: expect.any(String),
       },
       readAt: null,
     });
-    expect(JSON.stringify(row)).not.toContain('Secret private text');
+    // Preview is intentional for the recipient's own inbox; unauthorized users cannot list it.
+    expect(row.data.senderId).toBe(alex.id);
 
     const senderInbox = await request(app).get('/api/v1/notifications').set(bearer(alex.token));
     expect(senderInbox.body.data.items.some((item) => item.type === 'NEW_MESSAGE')).toBe(false);
