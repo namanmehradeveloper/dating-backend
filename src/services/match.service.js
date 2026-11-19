@@ -4,7 +4,7 @@
 import { Conversation } from '../models/Conversation.js';
 import { buildPairKey, Match } from '../models/Match.js';
 import { Profile } from '../models/Profile.js';
-import { Swipe } from '../models/Swipe.js';
+import { LIKE_ACTIONS, Swipe } from '../models/Swipe.js';
 import { User } from '../models/User.js';
 import { ApiError } from '../utils/ApiError.js';
 import { newId } from '../utils/ids.js';
@@ -147,15 +147,36 @@ async function announceNewMatch(match, swiperId) {
   ]);
 }
 
+// Rolls back a match that was inserted without two surviving mutual likes (undo race).
+async function abandonIncompleteMatch(match) {
+  await Swipe.updateMany({ matchId: match._id }, { $unset: { matchId: 1 } });
+  await Conversation.deleteOne({ _id: match.conversationId });
+  await Match.deleteOne({ _id: match._id });
+}
+
 // Creates the match and conversation for a mutual like. Exactly one match and one conversation
 // exist per pair however many requests race. Only the request that created the match announces it.
+// Returns null when a concurrent undo removed a like before both sides could be linked.
 export async function createMatchForMutualLike(swiperId, targetUserId) {
+  const likeFilter = {
+    $or: [
+      { userId: swiperId, targetUserId, action: { $in: LIKE_ACTIONS } },
+      { userId: targetUserId, targetUserId: swiperId, action: { $in: LIKE_ACTIONS } },
+    ],
+  };
+  if ((await Swipe.countDocuments(likeFilter)) < 2) return null;
+
   const { match, created } = await upsertMatch(swiperId, targetUserId);
   await ensureConversation(match);
-  await Swipe.updateMany(
-    { $or: [{ userId: swiperId, targetUserId }, { userId: targetUserId, targetUserId: swiperId }] },
-    { $set: { matchId: match._id } },
-  );
+  await Swipe.updateMany(likeFilter, { $set: { matchId: match._id } });
+
+  const linked = await Swipe.countDocuments({ matchId: match._id, action: { $in: LIKE_ACTIONS } });
+  if (linked < 2) {
+    if (created) await abandonIncompleteMatch(match);
+    else await Swipe.updateMany({ matchId: match._id }, { $unset: { matchId: 1 } });
+    return null;
+  }
+
   if (created) await announceNewMatch(match, swiperId);
   return match;
 }

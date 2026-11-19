@@ -65,6 +65,7 @@ export async function recordSwipe(userId, { targetUserId, action }) {
   }
 
   const match = await createMatchForMutualLike(userId, targetUserId);
+  if (!match) return { swipeId: swipe._id, isMatch: false, match: null };
   return { swipeId: swipe._id, isMatch: true, match: await presentMatchFor(match, userId) };
 }
 
@@ -97,19 +98,22 @@ async function consumeRewindQuota(userId) {
 }
 
 // Undoes the member's most recent swipe (premium, or free when freeDailyRewinds > 0).
-// Swipes that created a match cannot be undone.
+// Swipes that created a match cannot be undone. Deletion is atomic on matchId:null so a
+// concurrent mutual-like cannot orphan an ACTIVE match by racing the read-then-delete path.
 export async function undoLastSwipe(userId) {
   await assertRewindEntitlement(userId);
 
-  const lastSwipe = await Swipe.findOne({ userId }).sort({ createdAt: -1, _id: -1 });
-  if (!lastSwipe) throw ApiError.notFound('There is nothing to undo.');
-  if (lastSwipe.matchId) throw ApiError.conflict('This swipe created a match. Unmatch instead.');
+  const deleted = await Swipe.findOneAndDelete({ userId, matchId: null }, { sort: { createdAt: -1, _id: -1 } });
+  if (!deleted) {
+    const lastSwipe = await Swipe.findOne({ userId }).sort({ createdAt: -1, _id: -1 });
+    if (!lastSwipe) throw ApiError.notFound('There is nothing to undo.');
+    throw ApiError.conflict('This swipe created a match. Unmatch instead.');
+  }
 
-  await Swipe.deleteOne({ _id: lastSwipe._id });
   await consumeRewindQuota(userId);
 
   try {
-    const { user, profile } = await findVisibleMember(userId, lastSwipe.targetUserId);
+    const { user, profile } = await findVisibleMember(userId, deleted.targetUserId);
     const viewer = await Profile.findOne({ userId }).select('location').lean();
     return { restoredProfile: await toSinglePublicProfile(profile, user, viewer?.location ?? null) };
   } catch (error) {
