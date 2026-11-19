@@ -60,12 +60,18 @@ export async function recordSwipe(userId, { targetUserId, action }) {
 
   const likedBack = await Swipe.exists({ userId: targetUserId, targetUserId: userId, ...ACTIVE_LIKE_FILTER });
   if (!likedBack) {
-    await notifyUser(targetUserId, {
-      type: 'NEW_LIKE',
-      title: 'Someone likes you',
-      body: 'Someone new liked your profile.',
-      data: { destination: 'matches_received', kind: 'NEW_LIKE' },
-    });
+    // Only notify when the like would appear in GET /likes/received. Any prior swipe from the
+    // recipient (LIKE / PASS / SUPER_LIKE, including soft-canceled) keeps them out of Liked you
+    // and blocks Like back via the unique index — a NEW_LIKE would be a dead-end.
+    const recipientAlreadyResponded = await Swipe.exists({ userId: targetUserId, targetUserId: userId });
+    if (!recipientAlreadyResponded) {
+      await notifyUser(targetUserId, {
+        type: 'NEW_LIKE',
+        title: 'Someone likes you',
+        body: 'Someone new liked your profile.',
+        data: { destination: 'matches_received', kind: 'NEW_LIKE' },
+      });
+    }
     return { swipeId: swipe._id, isMatch: false, match: null };
   }
 
@@ -205,11 +211,15 @@ async function presentLikes(swipes, counterpartField) {
 
 // People who liked the member and are still waiting for an answer. Free members only see the count
 // (403 SUBSCRIPTION_REQUIRED with reason COUNT_<n>) so the paywall can show it.
+//
+// "Answered" = any swipe row from the viewer toward that person (including PASS and soft-canceled
+// likes). Soft-canceled rows still occupy the unique index, so Like back would 409 — hide them.
 export async function listReceivedLikes(userId, { limit, cursor }) {
-  const answeredIds = await Swipe.distinct('targetUserId', { userId, canceledAt: null });
+  const answeredIds = await Swipe.distinct('targetUserId', { userId });
   const pending = await Swipe.find({
     targetUserId: userId,
     ...ACTIVE_LIKE_FILTER,
+    matchId: null,
     userId: { $nin: answeredIds },
   })
     .select('userId')
@@ -223,6 +233,7 @@ export async function listReceivedLikes(userId, { limit, cursor }) {
   const filter = {
     targetUserId: userId,
     ...ACTIVE_LIKE_FILTER,
+    matchId: null,
     userId: { $in: visibleIds },
     ...getAfterCursorFilter(cursor),
   };
