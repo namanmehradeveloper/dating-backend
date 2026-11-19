@@ -158,10 +158,11 @@ async function abandonIncompleteMatch(match) {
 // exist per pair however many requests race. Only the request that created the match announces it.
 // Returns null when a concurrent undo removed a like before both sides could be linked.
 export async function createMatchForMutualLike(swiperId, targetUserId) {
+  // Ignore soft-canceled pending likes so a concurrent Unlike cannot be linked into a Match.
   const likeFilter = {
     $or: [
-      { userId: swiperId, targetUserId, action: { $in: LIKE_ACTIONS } },
-      { userId: targetUserId, targetUserId: swiperId, action: { $in: LIKE_ACTIONS } },
+      { userId: swiperId, targetUserId, action: { $in: LIKE_ACTIONS }, canceledAt: null },
+      { userId: targetUserId, targetUserId: swiperId, action: { $in: LIKE_ACTIONS }, canceledAt: null },
     ],
   };
   if ((await Swipe.countDocuments(likeFilter)) < 2) return null;
@@ -170,7 +171,11 @@ export async function createMatchForMutualLike(swiperId, targetUserId) {
   await ensureConversation(match);
   await Swipe.updateMany(likeFilter, { $set: { matchId: match._id } });
 
-  const linked = await Swipe.countDocuments({ matchId: match._id, action: { $in: LIKE_ACTIONS } });
+  const linked = await Swipe.countDocuments({
+    matchId: match._id,
+    action: { $in: LIKE_ACTIONS },
+    canceledAt: null,
+  });
   if (linked < 2) {
     if (created) await abandonIncompleteMatch(match);
     else await Swipe.updateMany({ matchId: match._id }, { $unset: { matchId: 1 } });

@@ -39,7 +39,12 @@ describe('GET /likes/received', () => {
     const res = await request(app).get('/api/v1/likes/received').set(bearer(member.token));
     expect(res.status).toBe(200);
     expect(res.body.data.items).toEqual([
-      { user: expect.objectContaining({ id: liker.id, displayName: 'Liker' }), action: 'SUPER_LIKE', likedAt: expect.any(String) },
+      {
+        id: expect.any(String),
+        user: expect.objectContaining({ id: liker.id, displayName: 'Liker' }),
+        action: 'SUPER_LIKE',
+        likedAt: expect.any(String),
+      },
     ]);
     expect(res.body.data.nextCursor).toBeNull();
   });

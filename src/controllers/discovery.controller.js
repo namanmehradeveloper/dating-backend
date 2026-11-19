@@ -35,6 +35,11 @@ export async function getSentLikes(req, res) {
   return ApiResponse.ok(res, await swipeService.listSentLikes(req.user.id, parsePagination(req.query)));
 }
 
+// POST /likes/sent/:targetUserId/cancel — cancel your own pending outgoing like.
+export async function cancelSentLike(req, res) {
+  return ApiResponse.ok(res, await swipeService.cancelOutgoingLike(req.user.id, req.params.targetUserId));
+}
+
 // GET /matches — active matches, newest first.
 export async function getMatches(req, res) {
   return ApiResponse.ok(res, await matchService.listMatches(req.user.id, parsePagination(req.query)));

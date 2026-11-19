@@ -14,6 +14,9 @@ const swipeSchema = new mongoose.Schema(
     targetUserId: { type: String, required: true },
     action: { type: String, enum: SWIPE_ACTIONS, required: true },
     matchId: String,
+    // Set when the sender cancels a pending LIKE/SUPER_LIKE. Row is kept so daily quotas
+    // and discovery "already swiped" behaviour stay intact; lists and matching ignore it.
+    canceledAt: Date,
   },
   { timestamps: true },
 );
@@ -21,5 +24,6 @@ const swipeSchema = new mongoose.Schema(
 swipeSchema.index({ userId: 1, targetUserId: 1 }, { unique: true });
 swipeSchema.index({ targetUserId: 1, action: 1, createdAt: -1 });
 swipeSchema.index({ userId: 1, createdAt: -1 });
+swipeSchema.index({ userId: 1, action: 1, matchId: 1, canceledAt: 1, createdAt: -1 });
 
 export const Swipe = mongoose.model('Swipe', swipeSchema);

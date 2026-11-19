@@ -24,6 +24,9 @@ router.get('/likes/received', requireAuth, discoveryController.getReceivedLikes)
 // GET /api/v1/likes/sent — your pending likes.
 router.get('/likes/sent', requireAuth, discoveryController.getSentLikes);
 
+// POST /api/v1/likes/sent/:targetUserId/cancel — cancel your own pending outgoing like (120/min).
+router.post('/likes/sent/:targetUserId/cancel', requireAuth, swipeLimit, discoveryController.cancelSentLike);
+
 // GET /api/v1/matches — active matches, newest first.
 router.get('/matches', requireAuth, discoveryController.getMatches);
 

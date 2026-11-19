@@ -1,9 +1,11 @@
-// Swipes (LIKE / PASS / SUPER_LIKE), free daily quotas, undo, and the likes lists.
+// Swipes (LIKE / PASS / SUPER_LIKE), free daily quotas, undo, cancel pending like, and likes lists.
 
+import { buildPairKey, Match } from '../models/Match.js';
 import { LIKE_ACTIONS, Swipe } from '../models/Swipe.js';
 import { Profile } from '../models/Profile.js';
 import { User } from '../models/User.js';
 import { ApiError } from '../utils/ApiError.js';
+import { isValidId } from '../validators/common.js';
 import { buildPage, getAfterCursorFilter, getPageSort } from '../utils/pagination.js';
 import { filterVisibleUserIds } from './accountStatus.service.js';
 import { getBlockedUserIds } from './block.service.js';
@@ -15,6 +17,9 @@ import { getSetting } from './settings.service.js';
 import { isPremium } from './subscription.service.js';
 
 const QUOTA_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+// Active (not canceled) LIKE / SUPER_LIKE rows — used for matching and pending lists.
+const ACTIVE_LIKE_FILTER = { action: { $in: LIKE_ACTIONS }, canceledAt: null };
 
 // Throws SUBSCRIPTION_REQUIRED when a free member has used today's likes or super-likes.
 async function assertSwipeQuota(userId, action) {
@@ -53,7 +58,7 @@ export async function recordSwipe(userId, { targetUserId, action }) {
   const swipe = await saveSwipe(userId, targetUserId, action);
   if (!LIKE_ACTIONS.includes(action)) return { swipeId: swipe._id, isMatch: false, match: null };
 
-  const likedBack = await Swipe.exists({ userId: targetUserId, targetUserId: userId, action: { $in: LIKE_ACTIONS } });
+  const likedBack = await Swipe.exists({ userId: targetUserId, targetUserId: userId, ...ACTIVE_LIKE_FILTER });
   if (!likedBack) {
     await notifyUser(targetUserId, {
       type: 'NEW_LIKE',
@@ -98,14 +103,17 @@ async function consumeRewindQuota(userId) {
 }
 
 // Undoes the member's most recent swipe (premium, or free when freeDailyRewinds > 0).
-// Swipes that created a match cannot be undone. Deletion is atomic on matchId:null so a
-// concurrent mutual-like cannot orphan an ACTIVE match by racing the read-then-delete path.
+// Swipes that created a match cannot be undone. Canceled pending likes are skipped (use cancel).
+// Deletion is atomic on matchId:null so a concurrent mutual-like cannot orphan an ACTIVE match.
 export async function undoLastSwipe(userId) {
   await assertRewindEntitlement(userId);
 
-  const deleted = await Swipe.findOneAndDelete({ userId, matchId: null }, { sort: { createdAt: -1, _id: -1 } });
+  const deleted = await Swipe.findOneAndDelete(
+    { userId, matchId: null, canceledAt: null },
+    { sort: { createdAt: -1, _id: -1 } },
+  );
   if (!deleted) {
-    const lastSwipe = await Swipe.findOne({ userId }).sort({ createdAt: -1, _id: -1 });
+    const lastSwipe = await Swipe.findOne({ userId, canceledAt: null }).sort({ createdAt: -1, _id: -1 });
     if (!lastSwipe) throw ApiError.notFound('There is nothing to undo.');
     throw ApiError.conflict('This swipe created a match. Unmatch instead.');
   }
@@ -120,6 +128,51 @@ export async function undoLastSwipe(userId) {
     if (error instanceof ApiError && error.code === 'NOT_FOUND') return { restoredProfile: null };
     throw error;
   }
+}
+
+// Cancels the authenticated member's own pending outgoing LIKE / SUPER_LIKE toward targetUserId.
+// Soft-cancels (sets canceledAt) so daily quotas and discovery exclusion stay intact.
+// Atomic on matchId:null + canceledAt:null so a concurrent Like Back that links a Match wins.
+// Does not delete Matches, Conversations, or unrelated NEW_LIKE inbox rows (anonymous, no fromUserId).
+export async function cancelOutgoingLike(userId, targetUserId) {
+  if (!isValidId(targetUserId) || !targetUserId.startsWith('usr_')) {
+    throw ApiError.validation([{ field: 'targetUserId', reason: 'INVALID' }]);
+  }
+  if (targetUserId === userId) {
+    throw ApiError.validation([{ field: 'targetUserId', reason: 'INVALID' }]);
+  }
+
+  const activeMatch = await Match.exists({ pairKey: buildPairKey(userId, targetUserId), status: 'ACTIVE' });
+  if (activeMatch) {
+    throw ApiError.conflict('This like already created a match. Unmatch instead.');
+  }
+
+  const canceled = await Swipe.findOneAndUpdate(
+    {
+      userId,
+      targetUserId,
+      action: { $in: LIKE_ACTIONS },
+      matchId: null,
+      canceledAt: null,
+    },
+    { $set: { canceledAt: new Date() } },
+    { returnDocument: 'after' },
+  );
+
+  if (canceled) {
+    return { canceled: true, targetUserId, action: canceled.action, swipeId: canceled._id };
+  }
+
+  // Lost the race to a concurrent Like Back / match link, or the like was already handled.
+  const existing = await Swipe.findOne({ userId, targetUserId, action: { $in: LIKE_ACTIONS } }).lean();
+  if (!existing) throw ApiError.notFound('There is no pending like to cancel.');
+  if (existing.canceledAt) throw ApiError.conflict('This like was already canceled.');
+  if (existing.matchId) throw ApiError.conflict('This like already created a match. Unmatch instead.');
+
+  const matchedNow = await Match.exists({ pairKey: buildPairKey(userId, targetUserId), status: 'ACTIVE' });
+  if (matchedNow) throw ApiError.conflict('This like already created a match. Unmatch instead.');
+
+  throw ApiError.conflict('This like can no longer be canceled.');
 }
 
 // Returns the ids of likers/likees that the member may see (visible and not blocked either way).
@@ -142,14 +195,23 @@ async function presentLikes(swipes, counterpartField) {
 
   return swipes
     .filter((swipe) => profileById.has(swipe[counterpartField]))
-    .map((swipe) => ({ user: profileById.get(swipe[counterpartField]), action: swipe.action, likedAt: swipe.createdAt }));
+    .map((swipe) => ({
+      id: swipe._id,
+      user: profileById.get(swipe[counterpartField]),
+      action: swipe.action,
+      likedAt: swipe.createdAt,
+    }));
 }
 
 // People who liked the member and are still waiting for an answer. Free members only see the count
 // (403 SUBSCRIPTION_REQUIRED with reason COUNT_<n>) so the paywall can show it.
 export async function listReceivedLikes(userId, { limit, cursor }) {
-  const answeredIds = await Swipe.distinct('targetUserId', { userId });
-  const pending = await Swipe.find({ targetUserId: userId, action: { $in: LIKE_ACTIONS }, userId: { $nin: answeredIds } })
+  const answeredIds = await Swipe.distinct('targetUserId', { userId, canceledAt: null });
+  const pending = await Swipe.find({
+    targetUserId: userId,
+    ...ACTIVE_LIKE_FILTER,
+    userId: { $nin: answeredIds },
+  })
     .select('userId')
     .lean();
   const visibleIds = await visibleCounterpartIds(userId, pending, 'userId');
@@ -158,18 +220,29 @@ export async function listReceivedLikes(userId, { limit, cursor }) {
     throw new ApiError('SUBSCRIPTION_REQUIRED', { details: [{ field: 'likes', reason: `COUNT_${visibleIds.length}` }] });
   }
 
-  const filter = { targetUserId: userId, action: { $in: LIKE_ACTIONS }, userId: { $in: visibleIds }, ...getAfterCursorFilter(cursor) };
+  const filter = {
+    targetUserId: userId,
+    ...ACTIVE_LIKE_FILTER,
+    userId: { $in: visibleIds },
+    ...getAfterCursorFilter(cursor),
+  };
   const docs = await Swipe.find(filter).sort(getPageSort()).limit(limit + 1).lean();
   const page = buildPage(docs, limit);
   return { items: await presentLikes(page.items, 'userId'), nextCursor: page.nextCursor };
 }
 
-// The member's likes that have not turned into a match yet.
+// The member's likes that have not turned into a match yet (excludes canceled pending likes).
 export async function listSentLikes(userId, { limit, cursor }) {
-  const pending = await Swipe.find({ userId, action: { $in: LIKE_ACTIONS }, matchId: null }).select('targetUserId').lean();
+  const pending = await Swipe.find({ userId, ...ACTIVE_LIKE_FILTER, matchId: null }).select('targetUserId').lean();
   const visibleIds = await visibleCounterpartIds(userId, pending, 'targetUserId');
 
-  const filter = { userId, action: { $in: LIKE_ACTIONS }, matchId: null, targetUserId: { $in: visibleIds }, ...getAfterCursorFilter(cursor) };
+  const filter = {
+    userId,
+    ...ACTIVE_LIKE_FILTER,
+    matchId: null,
+    targetUserId: { $in: visibleIds },
+    ...getAfterCursorFilter(cursor),
+  };
   const docs = await Swipe.find(filter).sort(getPageSort()).limit(limit + 1).lean();
   const page = buildPage(docs, limit);
   return { items: await presentLikes(page.items, 'targetUserId'), nextCursor: page.nextCursor };
