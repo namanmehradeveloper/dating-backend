@@ -6,7 +6,7 @@ import { ApiError } from '../utils/ApiError.js';
 import { DAY } from '../utils/rateLimit.js';
 
 export const TICKET_DAILY_LIMIT = 5;
-const LIMIT_MESSAGE = 'You can open up to 5 support tickets per day. Please try again later.';
+const LIMIT_MESSAGE = 'You’ve reached your daily limit of 5 support tickets. Please try again tomorrow.';
 
 export function ticketQuotaKey({ userId, ipKey }) {
   if (userId) return `user:${userId}`;
