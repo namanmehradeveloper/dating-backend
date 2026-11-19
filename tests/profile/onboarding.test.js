@@ -8,9 +8,20 @@ import { Media } from '../../src/models/Media.js';
 import { Profile } from '../../src/models/Profile.js';
 import { User } from '../../src/models/User.js';
 import { issueAccessToken } from '../../src/services/token.service.js';
+import { latestBirthDateForAge } from '../../src/utils/age.js';
 import { bearer, nextPhoneNumber, useTestDatabase } from '../helpers/factories.js';
 
 const app = createApp();
+
+function isoUtc(date) {
+  return date.toISOString().slice(0, 10);
+}
+
+function shiftIsoDay(isoDate, days) {
+  const date = new Date(`${isoDate}T00:00:00.000Z`);
+  date.setUTCDate(date.getUTCDate() + days);
+  return isoUtc(date);
+}
 
 // Creates a new member who has not onboarded yet, plus two uploaded profile photos.
 async function createNewMember() {
@@ -109,6 +120,30 @@ describe('POST /profile/onboarding', () => {
     expect(res.status).toBe(403);
     expect(res.body.error.code).toBe('ACCOUNT_INELIGIBLE');
     expect((await User.findById(member.user._id)).onboardingComplete).toBe(false);
+  });
+
+  it('accepts a member who turns exactly 18 today', async () => {
+    const res = await onboard({ ...validBody(member.photoIds), dateOfBirth: isoUtc(latestBirthDateForAge(18)) });
+    expect(res.status).toBe(200);
+  });
+
+  it('rejects a member one day under 18 with ACCOUNT_INELIGIBLE', async () => {
+    const dateOfBirth = shiftIsoDay(isoUtc(latestBirthDateForAge(18)), 1);
+    const res = await onboard({ ...validBody(member.photoIds), dateOfBirth });
+    expect(res.status).toBe(403);
+    expect(res.body.error.code).toBe('ACCOUNT_INELIGIBLE');
+  });
+
+  it('rejects a future date of birth as INVALID', async () => {
+    const dateOfBirth = shiftIsoDay(isoUtc(new Date()), 1);
+    const res = await onboard({ ...validBody(member.photoIds), dateOfBirth });
+    expect(res.status).toBe(400);
+    expect(res.body.error.details).toEqual(expect.arrayContaining([{ field: 'dateOfBirth', reason: 'INVALID' }]));
+  });
+
+  it('accepts a leap-day DOB once the member is 18+', async () => {
+    const res = await onboard({ ...validBody(member.photoIds), dateOfBirth: '2004-02-29' });
+    expect(res.status).toBe(200);
   });
 
   it.each([

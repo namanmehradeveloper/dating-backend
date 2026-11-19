@@ -17,8 +17,17 @@ export function calculateAge(dateOfBirth, onDate = new Date()) {
 
 // Returns the latest birth date that still makes someone `age` years old today.
 // Used to turn an age range into a dateOfBirth range for database queries.
+// Leap-day overflow (Feb 29 in a non-leap year) clamps to the last valid day of that month
+// so "exactly `age` today" stays inclusive.
 export function latestBirthDateForAge(age, onDate = new Date()) {
-  return new Date(Date.UTC(onDate.getUTCFullYear() - age, onDate.getUTCMonth(), onDate.getUTCDate()));
+  const year = onDate.getUTCFullYear() - age;
+  const month = onDate.getUTCMonth();
+  const day = onDate.getUTCDate();
+  const date = new Date(Date.UTC(year, month, day));
+  if (date.getUTCMonth() !== month) {
+    return new Date(Date.UTC(year, month + 1, 0));
+  }
+  return date;
 }
 
 // Returns the earliest birth date for someone who is at most `age` years old today.

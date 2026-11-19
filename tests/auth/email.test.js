@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest';
 import { createApp } from '../../src/app.js';
 import { Profile } from '../../src/models/Profile.js';
 import { User } from '../../src/models/User.js';
+import { latestBirthDateForAge } from '../../src/utils/age.js';
 import { useTestDatabase } from '../helpers/factories.js';
 
 const app = createApp();
@@ -16,6 +17,16 @@ const validRegistration = {
   dateOfBirth: '1995-05-20',
   acceptedTermsVersion: '2026-01',
 };
+
+function isoUtc(date) {
+  return date.toISOString().slice(0, 10);
+}
+
+function shiftIsoDay(isoDate, days) {
+  const date = new Date(`${isoDate}T00:00:00.000Z`);
+  date.setUTCDate(date.getUTCDate() + days);
+  return isoUtc(date);
+}
 
 describe('POST /auth/register', () => {
   useTestDatabase();
@@ -49,6 +60,39 @@ describe('POST /auth/register', () => {
     const res = await request(app).post('/api/v1/auth/register').send({ ...validRegistration, dateOfBirth: `${year}-01-01` });
     expect(res.status).toBe(403);
     expect(res.body.error.code).toBe('ACCOUNT_INELIGIBLE');
+  });
+
+  it('accepts a member who turns exactly 18 today', async () => {
+    const dateOfBirth = isoUtc(latestBirthDateForAge(18));
+    const res = await request(app)
+      .post('/api/v1/auth/register')
+      .send({ ...validRegistration, email: 'exactly18@example.com', dateOfBirth });
+    expect(res.status).toBe(201);
+  });
+
+  it('rejects a member one day under 18 with ACCOUNT_INELIGIBLE', async () => {
+    const dateOfBirth = shiftIsoDay(isoUtc(latestBirthDateForAge(18)), 1);
+    const res = await request(app)
+      .post('/api/v1/auth/register')
+      .send({ ...validRegistration, email: 'under18@example.com', dateOfBirth });
+    expect(res.status).toBe(403);
+    expect(res.body.error.code).toBe('ACCOUNT_INELIGIBLE');
+  });
+
+  it('rejects a future date of birth as INVALID', async () => {
+    const dateOfBirth = shiftIsoDay(isoUtc(new Date()), 1);
+    const res = await request(app)
+      .post('/api/v1/auth/register')
+      .send({ ...validRegistration, email: 'future@example.com', dateOfBirth });
+    expect(res.status).toBe(400);
+    expect(res.body.error.details).toEqual(expect.arrayContaining([{ field: 'dateOfBirth', reason: 'INVALID' }]));
+  });
+
+  it('accepts a leap-day DOB once the member is 18+', async () => {
+    const res = await request(app)
+      .post('/api/v1/auth/register')
+      .send({ ...validRegistration, email: 'leap@example.com', dateOfBirth: '2004-02-29' });
+    expect(res.status).toBe(201);
   });
 
   it('validates every field', async () => {
