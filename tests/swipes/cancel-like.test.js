@@ -122,7 +122,7 @@ describe('POST /likes/sent/:targetUserId/cancel', () => {
     expect((await swipe(app, sender, second.id, 'LIKE')).status).toBe(200);
   });
 
-  it('does not delete unrelated NEW_LIKE notifications', async () => {
+  it('clears only that sender NEW_LIKE notification and keeps unrelated ones', async () => {
     const sender = await createMember();
     const recipient = await createMember();
     const other = await createMember();
@@ -134,8 +134,10 @@ describe('POST /likes/sent/:targetUserId/cancel', () => {
 
     await cancelLike(sender, recipient.id);
 
-    const after = await Notification.countDocuments({ userId: recipient.id, type: 'NEW_LIKE' });
-    expect(after).toBe(2);
+    const remaining = await Notification.find({ userId: recipient.id, type: 'NEW_LIKE' }).lean();
+    expect(remaining).toHaveLength(1);
+    const fromUserId = remaining[0].data?.fromUserId ?? remaining[0].data?.get?.('fromUserId');
+    expect(fromUserId).toBe(other.id);
   });
 
   it('handles concurrent Like Back and Unlike safely (no orphan ACTIVE match)', async () => {

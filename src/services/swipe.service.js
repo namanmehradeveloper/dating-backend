@@ -10,7 +10,7 @@ import { buildPage, getAfterCursorFilter, getPageSort } from '../utils/paginatio
 import { filterVisibleUserIds } from './accountStatus.service.js';
 import { getBlockedUserIds } from './block.service.js';
 import { createMatchForMutualLike, presentMatchFor } from './match.service.js';
-import { notifyUser } from './notification.service.js';
+import { clearNewLikeNotification, notifyUser } from './notification.service.js';
 import { findVisibleMember } from './profile.service.js';
 import { toPublicProfiles, toSinglePublicProfile } from './profilePresenter.js';
 import { getSetting } from './settings.service.js';
@@ -39,13 +39,22 @@ async function assertSwipeQuota(userId, action) {
   }
 }
 
-// Saves the swipe. Responding to the same member twice is 409 CONFLICT.
+// Saves the swipe. A prior PASS can be upgraded to LIKE / SUPER_LIKE (Liked You → Like back).
+// Any other repeat response is 409 CONFLICT.
 async function saveSwipe(userId, targetUserId, action) {
   try {
     return await Swipe.create({ userId, targetUserId, action });
   } catch (error) {
-    if (error?.code === 11000) throw ApiError.conflict('You already responded to this profile.');
-    throw error;
+    if (error?.code !== 11000) throw error;
+    if (LIKE_ACTIONS.includes(action)) {
+      const upgraded = await Swipe.findOneAndUpdate(
+        { userId, targetUserId, action: 'PASS', canceledAt: null, matchId: null },
+        { $set: { action } },
+        { returnDocument: 'after' },
+      );
+      if (upgraded) return upgraded;
+    }
+    throw ApiError.conflict('You already responded to this profile.');
   }
 }
 
@@ -56,6 +65,10 @@ export async function recordSwipe(userId, { targetUserId, action }) {
   await assertSwipeQuota(userId, action);
 
   const swipe = await saveSwipe(userId, targetUserId, action);
+
+  // Answering (like or pass) clears that person's anonymous Liked You notification.
+  await clearNewLikeNotification(userId, targetUserId);
+
   if (!LIKE_ACTIONS.includes(action)) return { swipeId: swipe._id, isMatch: false, match: null };
 
   const likedBack = await Swipe.exists({ userId: targetUserId, targetUserId: userId, ...ACTIVE_LIKE_FILTER });
@@ -64,7 +77,7 @@ export async function recordSwipe(userId, { targetUserId, action }) {
       type: 'NEW_LIKE',
       title: 'Someone likes you',
       body: 'Someone new liked your profile.',
-      data: { destination: 'matches_received', kind: 'NEW_LIKE' },
+      data: { destination: 'matches_received', kind: 'NEW_LIKE', fromUserId: userId },
     });
     return { swipeId: swipe._id, isMatch: false, match: null };
   }
@@ -133,7 +146,7 @@ export async function undoLastSwipe(userId) {
 // Cancels the authenticated member's own pending outgoing LIKE / SUPER_LIKE toward targetUserId.
 // Soft-cancels (sets canceledAt) so daily quotas and discovery exclusion stay intact.
 // Atomic on matchId:null + canceledAt:null so a concurrent Like Back that links a Match wins.
-// Does not delete Matches, Conversations, or unrelated NEW_LIKE inbox rows (anonymous, no fromUserId).
+// Clears that recipient's NEW_LIKE inbox row for this sender; other likers' rows stay.
 export async function cancelOutgoingLike(userId, targetUserId) {
   if (!isValidId(targetUserId) || !targetUserId.startsWith('usr_')) {
     throw ApiError.validation([{ field: 'targetUserId', reason: 'INVALID' }]);
@@ -160,6 +173,7 @@ export async function cancelOutgoingLike(userId, targetUserId) {
   );
 
   if (canceled) {
+    await clearNewLikeNotification(targetUserId, userId);
     return { canceled: true, targetUserId, action: canceled.action, swipeId: canceled._id };
   }
 
@@ -203,14 +217,19 @@ async function presentLikes(swipes, counterpartField) {
     }));
 }
 
-// People who liked the member and are still waiting for an answer. Free members only see the count
-// (403 SUBSCRIPTION_REQUIRED with reason COUNT_<n>) so the paywall can show it.
+// People who liked the member and are still waiting for a like-back.
+// A prior PASS does not hide them (Like back can upgrade PASS → LIKE). Matched / liked-back rows are excluded.
+// Free members only see the count (403 SUBSCRIPTION_REQUIRED with reason COUNT_<n>) so the paywall can show it.
 export async function listReceivedLikes(userId, { limit, cursor }) {
-  const answeredIds = await Swipe.distinct('targetUserId', { userId, canceledAt: null });
+  const likedBackIds = await Swipe.distinct('targetUserId', {
+    userId,
+    ...ACTIVE_LIKE_FILTER,
+  });
   const pending = await Swipe.find({
     targetUserId: userId,
     ...ACTIVE_LIKE_FILTER,
-    userId: { $nin: answeredIds },
+    matchId: null,
+    userId: { $nin: likedBackIds },
   })
     .select('userId')
     .lean();
@@ -223,6 +242,7 @@ export async function listReceivedLikes(userId, { limit, cursor }) {
   const filter = {
     targetUserId: userId,
     ...ACTIVE_LIKE_FILTER,
+    matchId: null,
     userId: { $in: visibleIds },
     ...getAfterCursorFilter(cursor),
   };

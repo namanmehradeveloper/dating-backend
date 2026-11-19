@@ -23,16 +23,16 @@ describe('GET /likes/received', () => {
     expect(res.body.error).toMatchObject({ code: 'SUBSCRIPTION_REQUIRED', details: [{ field: 'likes', reason: 'COUNT_2' }] });
   });
 
-  it('lists pending likes for premium members, excluding answered and blocked members', async () => {
+  it('lists pending likes for premium members, excluding liked-back and blocked members', async () => {
     const member = await createMember();
     await grantPremium(member.id);
     const liker = await createMember({ profile: { displayName: 'Liker' } });
-    const answered = await createMember();
+    const likedBack = await createMember();
     const blocked = await createMember();
 
     await swipe(app, liker, member.id, 'SUPER_LIKE');
-    await swipe(app, answered, member.id, 'LIKE');
-    await swipe(app, member, answered.id, 'PASS');
+    await swipe(app, likedBack, member.id, 'LIKE');
+    await swipe(app, member, likedBack.id, 'LIKE');
     await swipe(app, blocked, member.id, 'LIKE');
     await Block.create({ blockerId: member.id, blockedId: blocked.id });
 
@@ -47,6 +47,25 @@ describe('GET /likes/received', () => {
       },
     ]);
     expect(res.body.data.nextCursor).toBeNull();
+  });
+
+  it('still lists a liker after a prior PASS, and Like back upgrades PASS into a match', async () => {
+    const member = await createMember();
+    await grantPremium(member.id);
+    const liker = await createMember({ profile: { displayName: 'SecondChance' } });
+
+    await swipe(app, member, liker.id, 'PASS');
+    await swipe(app, liker, member.id, 'LIKE');
+
+    const received = await request(app).get('/api/v1/likes/received').set(bearer(member.token));
+    expect(received.body.data.items.map((item) => item.user.id)).toEqual([liker.id]);
+
+    const likeBack = await swipe(app, member, liker.id, 'LIKE');
+    expect(likeBack.status).toBe(200);
+    expect(likeBack.body.data.isMatch).toBe(true);
+
+    const after = await request(app).get('/api/v1/likes/received').set(bearer(member.token));
+    expect(after.body.data.items).toEqual([]);
   });
 });
 

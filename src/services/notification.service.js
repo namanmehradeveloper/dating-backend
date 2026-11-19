@@ -133,8 +133,11 @@ export async function notifyUser(
 }
 
 // Shapes an inbox entry for the API.
+// NEW_LIKE keeps fromUserId server-side for cleanup only — never expose the liker in the inbox.
 function presentNotification(notification) {
-  const data = notification.data instanceof Map ? Object.fromEntries(notification.data) : (notification.data ?? {});
+  const raw = notification.data instanceof Map ? Object.fromEntries(notification.data) : (notification.data ?? {});
+  const data = { ...raw };
+  if (notification.type === 'NEW_LIKE') delete data.fromUserId;
   return {
     id: notification._id || notification.id,
     type: notification.type,
@@ -144,6 +147,16 @@ function presentNotification(notification) {
     createdAt: notification.createdAt,
     readAt: notification.readAt ?? null,
   };
+}
+
+// Removes the anonymous Liked You inbox row for one liker (cancel, match, or answered).
+export async function clearNewLikeNotification(recipientId, fromUserId) {
+  if (!recipientId || !fromUserId) return;
+  await Notification.deleteMany({
+    userId: recipientId,
+    type: 'NEW_LIKE',
+    'data.fromUserId': String(fromUserId),
+  });
 }
 
 // Returns one page of the member's inbox, newest first.

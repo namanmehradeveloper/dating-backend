@@ -11,7 +11,7 @@ import { newId } from '../utils/ids.js';
 import { buildPage, getAfterCursorFilter, getPageSort } from '../utils/pagination.js';
 import { isVisibleMember } from './accountStatus.service.js';
 import { getBlockedUserIds, isBlockedEitherWay } from './block.service.js';
-import { loadNotificationActor, notifyUser } from './notification.service.js';
+import { clearNewLikeNotification, loadNotificationActor, notifyUser } from './notification.service.js';
 import { toPublicProfile, toPublicProfiles } from './profilePresenter.js';
 import { emitToUser } from './realtime.service.js';
 import { loadInterestLabels } from './interest.service.js';
@@ -182,7 +182,13 @@ export async function createMatchForMutualLike(swiperId, targetUserId) {
     return null;
   }
 
-  if (created) await announceNewMatch(match, swiperId);
+  if (created) {
+    await Promise.all([
+      clearNewLikeNotification(swiperId, targetUserId),
+      clearNewLikeNotification(targetUserId, swiperId),
+      announceNewMatch(match, swiperId),
+    ]);
+  }
   return match;
 }
 

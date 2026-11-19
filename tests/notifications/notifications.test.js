@@ -54,15 +54,22 @@ describe('devices', () => {
 describe('notification inbox', () => {
   useTestDatabase();
 
-  it('stores NEW_LIKE and enriched NEW_MATCH notifications', async () => {
+  it('stores NEW_LIKE without exposing the liker, then clears it when a match forms', async () => {
     const alex = await createMember();
     const avery = await createMember();
     await swipe(app, alex, avery.id, 'LIKE');
+
+    const beforeMatch = await request(app).get('/api/v1/notifications').set(bearer(avery.token));
+    const likeNotification = beforeMatch.body.data.items.find((item) => item.type === 'NEW_LIKE');
+    expect(likeNotification.data).toMatchObject({ destination: 'matches_received' });
+    expect(likeNotification.data.fromUserId).toBeUndefined();
+    expect(likeNotification.body).toBe('Someone new liked your profile.');
+
     const match = await matchMembers(app, alex, avery);
 
     const res = await request(app).get('/api/v1/notifications').set(bearer(avery.token));
     const types = res.body.data.items.map((item) => item.type);
-    expect(types).toContain('NEW_LIKE');
+    expect(types).not.toContain('NEW_LIKE');
     expect(types).toContain('NEW_MATCH');
     const matchNotification = res.body.data.items.find((item) => item.type === 'NEW_MATCH');
     expect(matchNotification).toEqual({
@@ -79,9 +86,6 @@ describe('notification inbox', () => {
       createdAt: expect.any(String),
       readAt: null,
     });
-    const likeNotification = res.body.data.items.find((item) => item.type === 'NEW_LIKE');
-    expect(likeNotification.data).toMatchObject({ destination: 'matches_received' });
-    expect(likeNotification.body).toBe('Someone new liked your profile.');
   });
 
   it('stores NEW_MESSAGE inbox rows with preview fields and dedupes by messageId', async () => {
