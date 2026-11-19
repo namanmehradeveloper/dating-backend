@@ -25,6 +25,7 @@ export { Wallet } from './Wallet.js';
 export { InventoryItem } from './InventoryItem.js';
 export { StorePurchase } from './StorePurchase.js';
 export { SupportTicket } from './SupportTicket.js';
+export { SupportTicketQuota } from './SupportTicketQuota.js';
 export { VerificationRequest } from './VerificationRequest.js';
 export { AuditLog } from './AuditLog.js';
 export { AppSetting } from './AppSetting.js';

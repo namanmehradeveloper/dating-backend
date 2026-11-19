@@ -14,6 +14,8 @@ const ticketMessageSchema = new mongoose.Schema(
     author: { type: String, enum: ['USER', 'STAFF'], required: true },
     authorId: { type: String, required: true },
     body: { type: String, required: true },
+    // Client Idempotency-Key for member follow-ups (prevents duplicate inserts).
+    idempotencyKey: { type: String },
   },
   { timestamps: true },
 );
@@ -27,6 +29,8 @@ const supportTicketSchema = new mongoose.Schema(
     category: { type: String, enum: TICKET_CATEGORIES, required: true },
     subject: { type: String, required: true },
     status: { type: String, enum: TICKET_STATUSES, default: 'OPEN' },
+    // Client Idempotency-Key for create (UUID); unique when present.
+    idempotencyKey: { type: String },
     messages: { type: [ticketMessageSchema], default: [] },
   },
   { timestamps: true },
@@ -36,5 +40,9 @@ supportTicketSchema.index({ userId: 1, createdAt: -1 });
 supportTicketSchema.index({ status: 1, createdAt: -1 });
 supportTicketSchema.index({ contactEmail: 1, createdAt: -1 });
 supportTicketSchema.index({ contactName: 1, createdAt: -1 });
+supportTicketSchema.index(
+  { idempotencyKey: 1 },
+  { unique: true, partialFilterExpression: { idempotencyKey: { $type: 'string' } } },
+);
 
 export const SupportTicket = mongoose.model('SupportTicket', supportTicketSchema);

@@ -3,25 +3,25 @@
 import { Router } from 'express';
 import * as supportController from '../controllers/support.controller.js';
 import { optionalAuth, requireAuth } from '../middlewares/auth.middleware.js';
-import { byIp, byUser, createRateLimiter, DAY, HOUR } from '../utils/rateLimit.js';
+import { requireIdempotency } from '../middlewares/idempotency.middleware.js';
+import { byUser, createRateLimiter, HOUR } from '../utils/rateLimit.js';
 
 const router = Router();
 
-const memberTicketLimit = createRateLimiter({ windowMs: DAY, max: 5, keyFrom: byUser });
-const guestTicketLimit = createRateLimiter({ windowMs: DAY, max: 5, keyFrom: byIp });
+// Member follow-ups: soft anti-spam. Creates use MongoDB atomic daily quota instead.
 const memberReplyLimit = createRateLimiter({ windowMs: HOUR, max: 30, keyFrom: byUser });
-
-// Auth members: 5/day per user. Guests: 5/day per IP.
-function ticketCreateLimit(req, res, next) {
-  if (req.user?.id) return memberTicketLimit(req, res, next);
-  return guestTicketLimit(req, res, next);
-}
 
 // GET /api/v1/support/faqs — FAQ list (public).
 router.get('/support/faqs', supportController.getFaqs);
 
-// POST /api/v1/support/tickets — open a support ticket (auth optional; 5 per day).
-router.post('/support/tickets', optionalAuth, ticketCreateLimit, supportController.createTicket);
+// POST /api/v1/support/tickets — open a support ticket (auth optional; Idempotency-Key required).
+// Daily limit (5/user or 5/IP) is enforced atomically in support.service — not memory rate-limit.
+router.post(
+  '/support/tickets',
+  optionalAuth,
+  requireIdempotency,
+  supportController.createTicket,
+);
 
 // GET /api/v1/support/tickets — authenticated member's own tickets (must be before :ticketId).
 router.get('/support/tickets', requireAuth, supportController.listTickets);
@@ -29,10 +29,11 @@ router.get('/support/tickets', requireAuth, supportController.listTickets);
 // GET /api/v1/support/tickets/:ticketId — one of your own support tickets.
 router.get('/support/tickets/:ticketId', requireAuth, supportController.getTicket);
 
-// POST /api/v1/support/tickets/:ticketId/messages — owner follow-up (30/hour).
+// POST /api/v1/support/tickets/:ticketId/messages — owner follow-up (Idempotency-Key + 30/hour).
 router.post(
   '/support/tickets/:ticketId/messages',
   requireAuth,
+  requireIdempotency,
   memberReplyLimit,
   supportController.replyToTicket,
 );

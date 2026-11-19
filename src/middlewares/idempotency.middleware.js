@@ -1,10 +1,12 @@
 // Idempotency-Key support. The first request with a key is processed and its successful response
 // is stored for 24 hours. A retry with the same key and body gets the stored response; the same key
 // with a different body gets 409 CONFLICT. Failed requests are not stored, so they can be retried.
+// Authenticated callers are keyed by user id; guests (optionalAuth) by guest:<ip>.
 
 import crypto from 'node:crypto';
 import { IdempotencyRecord } from '../models/IdempotencyRecord.js';
 import { ApiError } from '../utils/ApiError.js';
+import { byIp } from '../utils/rateLimit.js';
 import { readIdempotencyKey } from '../validators/common.js';
 
 const RETENTION_MS = 24 * 60 * 60 * 1000;
@@ -13,6 +15,11 @@ const RETENTION_MS = 24 * 60 * 60 * 1000;
 function fingerprintRequest(route, req) {
   const content = JSON.stringify({ route, params: req.params, body: req.body ?? null });
   return crypto.createHash('sha256').update(content).digest('hex');
+}
+
+function idempotencyOwnerId(req) {
+  if (req.user?.id) return req.user.id;
+  return `guest:${byIp(req)}`;
 }
 
 // Sends a stored response again, with this request's own request id.
@@ -50,12 +57,14 @@ async function saveOutcome(userId, key, statusCode, body) {
   }
 }
 
-// Middleware for endpoints marked "Idempotent". Must run after requireAuth.
+// Middleware for endpoints marked "Idempotent". Run after requireAuth or optionalAuth.
 export async function requireIdempotency(req, res, next) {
   const key = readIdempotencyKey(req);
-  const userId = req.user.id;
+  const userId = idempotencyOwnerId(req);
   const route = `${req.method} ${req.baseUrl}${req.route.path}`;
   const fingerprint = fingerprintRequest(route, req);
+  req.idempotencyKey = key;
+  req.idempotencyOwnerId = userId;
 
   let existing = await claimKey(userId, key, route, fingerprint);
   if (existing && existing.expiresAt <= new Date()) {

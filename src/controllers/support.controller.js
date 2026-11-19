@@ -11,11 +11,17 @@ export async function getFaqs(req, res) {
   return ApiResponse.ok(res, { items: supportService.listFaqs() });
 }
 
-// POST /support/tickets — open a ticket (authenticated or guest).
+// POST /support/tickets — open a ticket (authenticated or guest). Requires Idempotency-Key.
 export async function createTicket(req, res) {
   const isGuest = !req.user?.id;
   const ticket = validateTicket(req.body, { isGuest });
-  return ApiResponse.created(res, await supportService.createTicket(req.user?.id ?? null, ticket));
+  return ApiResponse.created(
+    res,
+    await supportService.createTicket(req.user?.id ?? null, ticket, {
+      idempotencyKey: req.idempotencyKey,
+      ipKey: supportService.guestIpKeyFromRequest(req),
+    }),
+  );
 }
 
 // GET /support/tickets — authenticated member's own tickets.
@@ -28,10 +34,15 @@ export async function getTicket(req, res) {
   return ApiResponse.ok(res, await supportService.getTicket(req.user.id, req.params.ticketId));
 }
 
-// POST /support/tickets/:ticketId/messages — owner follow-up reply.
+// POST /support/tickets/:ticketId/messages — owner follow-up reply. Requires Idempotency-Key.
 export async function replyToTicket(req, res) {
   const reply = validateTicketReply(req.body);
-  return ApiResponse.created(res, await supportService.replyToTicket(req.user.id, req.params.ticketId, reply));
+  return ApiResponse.created(
+    res,
+    await supportService.replyToTicket(req.user.id, req.params.ticketId, reply, {
+      idempotencyKey: req.idempotencyKey,
+    }),
+  );
 }
 
 // POST /account/deletion-request — schedule account deletion (202).

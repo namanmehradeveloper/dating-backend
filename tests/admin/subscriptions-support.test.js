@@ -1,6 +1,7 @@
 // Tests the admin subscription overview (read-only, real data) and the support desk
 // (ticket list, details, status changes, staff replies, audit entries).
 
+import { randomUUID } from 'node:crypto';
 import request from 'supertest';
 import { describe, expect, it } from 'vitest';
 import { createApp } from '../../src/app.js';
@@ -53,7 +54,9 @@ describe('admin support', () => {
     const res = await request(app)
       .post('/api/v1/support/tickets')
       .set(bearer(member.token))
+      .set('Idempotency-Key', randomUUID())
       .send({ category: 'BILLING', subject: 'Charged twice', message: 'I was charged twice this month.', ...body });
+    expect(res.status).toBe(201);
     return res.body.data;
   }
 
@@ -82,13 +85,16 @@ describe('admin support', () => {
 
   it('lists guest tickets and skips in-app notify on reply', async () => {
     const moderator = await createStaff('MODERATOR');
-    const created = await request(app).post('/api/v1/support/tickets').send({
-      category: 'ACCOUNT',
-      subject: 'Need help signing in',
-      message: 'I cannot access my account anymore.',
-      name: 'Guest Ada',
-      email: 'ada.guest@example.test',
-    });
+    const created = await request(app)
+      .post('/api/v1/support/tickets')
+      .set('Idempotency-Key', randomUUID())
+      .send({
+        category: 'ACCOUNT',
+        subject: 'Need help signing in',
+        message: 'I cannot access my account anymore.',
+        name: 'Guest Ada',
+        email: 'ada.guest@example.test',
+      });
     expect(created.status).toBe(201);
 
     const list = await request(app).get('/api/v1/admin/support/tickets?q=ada.guest@example.test').set(bearer(moderator.token));
