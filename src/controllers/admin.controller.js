@@ -617,6 +617,10 @@ export async function updateCms(req, res) {
   return ApiResponse.ok(res, await adminCms.updateCms(req.user, req.params.id, changes));
 }
 
+export async function deleteCms(req, res) {
+  return ApiResponse.ok(res, await adminCms.deleteCms(req.user, req.params.id));
+}
+
 // ---- Coupons (ADMIN) ----
 
 export async function getCouponStats(req, res) {

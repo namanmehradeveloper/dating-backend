@@ -86,4 +86,22 @@ export async function setCmsStatus(actor, id, status) {
   return updateCms(actor, id, { status });
 }
 
+// DELETE /admin/cms/:id — permanently remove a CMS entry
+export async function deleteCms(actor, id) {
+  const doc = await CmsContent.findById(id);
+  if (!doc) throw ApiError.notFound();
+
+  const snapshot = { slug: doc.slug, type: doc.type, status: doc.status, title: doc.title };
+  await CmsContent.deleteOne({ _id: id });
+
+  await recordAudit(actor, {
+    action: 'CMS_DELETED',
+    targetType: 'CMS',
+    targetId: id,
+    metadata: snapshot,
+  });
+
+  return { deleted: true, id };
+}
+
 export { CMS_STATUSES, CMS_TYPES };

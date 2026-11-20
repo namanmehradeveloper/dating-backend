@@ -171,6 +171,7 @@ router.get('/cms', can('CMS', 'VIEW'), adminController.listCms);
 router.get('/cms/:id', can('CMS', 'VIEW'), adminController.getCms);
 router.post('/cms', can('CMS', 'CREATE'), adminController.createCms);
 router.patch('/cms/:id', can('CMS', 'EDIT'), adminController.updateCms);
+router.delete('/cms/:id', can('CMS', 'DELETE'), adminController.deleteCms);
 
 // ---- Coupons ----
 

@@ -117,6 +117,23 @@ describe('admin staff, CMS, fraud and related modules', () => {
     expect(published.status).toBe(200);
     expect(published.body.data.status).toBe('PUBLISHED');
     expect(published.body.data.publishedAt).toBeTruthy();
+
+    const deleteDenied = await request(app)
+      .delete(`/api/v1/admin/cms/${created.body.data.id}`)
+      .set(bearer(moderator.token));
+    expect(deleteDenied.status).toBe(403);
+
+    const deleted = await request(app)
+      .delete(`/api/v1/admin/cms/${created.body.data.id}`)
+      .set(bearer(admin.token));
+    expect(deleted.status).toBe(200);
+    expect(deleted.body.data).toEqual({ deleted: true, id: created.body.data.id });
+
+    const gone = await request(app).get(`/api/v1/admin/cms/${created.body.data.id}`).set(bearer(admin.token));
+    expect(gone.status).toBe(404);
+
+    const deleteAudit = await AuditLog.findOne({ action: 'CMS_DELETED', targetId: created.body.data.id });
+    expect(deleteAudit?.metadata?.slug).toBe('welcome');
   });
 
   it('runs rule-based fraud scan and updates signal status', async () => {
