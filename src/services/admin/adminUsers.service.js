@@ -21,6 +21,7 @@ import { recordAudit } from '../audit.service.js';
 import { loadInterestLabels } from '../interest.service.js';
 import { endAllMatchesForUser } from '../match.service.js';
 import { notifyUser } from '../notification.service.js';
+import { assertCanManageTargetRole, assertNotLastActiveSuperAdmin } from '../rbac.service.js';
 import { endUserSockets, getOnlineUserCount, getOnlineUserIds, isUserOnline } from '../realtime.service.js';
 import { presentEntitlement } from '../subscription.service.js';
 import { revokeAllUserTokens } from '../token.service.js';
@@ -532,29 +533,48 @@ export async function exportUserData(actor, userId) {
 }
 
 // POST /admin/users/:userId/deletion — schedule the 14-day deletion grace period (ADMIN tier).
+// Members: ADMIN or SUPER_ADMIN. Staff (incl. Admin/Moderator/Support): SUPER_ADMIN only.
 export async function scheduleUserDeletion(actor, userId, { reason }) {
   if (actor.role !== 'ADMIN' && actor.role !== 'SUPER_ADMIN') {
     throw ApiError.forbidden('Only admins can schedule account deletion.');
   }
   if (actor.id === userId) throw ApiError.forbidden('You cannot delete your own account from here.');
   const target = await loadUser(userId);
-  if (target.role !== 'USER') throw ApiError.forbidden('Staff accounts cannot be deleted from the users module.');
+
+  if (target.role !== 'USER') {
+    if (actor.role !== 'SUPER_ADMIN') {
+      throw ApiError.forbidden('Only a Super Admin can schedule deletion of staff accounts.');
+    }
+    await assertCanManageTargetRole(actor.role, target.role);
+    await assertNotLastActiveSuperAdmin(target, { actionLabel: 'schedule deletion of' });
+  }
+
   if (target.deletion?.status === 'SCHEDULED') {
     return {
       status: 'SCHEDULED',
       scheduledFor: target.deletion.scheduledFor,
       graceDays: DELETION_GRACE_DAYS,
+      role: target.role,
     };
   }
 
-  const result = await requestDeletion(userId, { reason, feedback: 'Scheduled by admin' });
+  const result = await requestDeletion(userId, {
+    reason,
+    feedback: 'Scheduled by admin',
+    scheduledBy: { id: actor.id, role: actor.role },
+  });
   await recordAudit(actor, {
     action: 'USER_DELETION_SCHEDULED',
     targetType: 'USER',
     targetId: userId,
-    metadata: { reason, scheduledFor: result.scheduledFor, graceDays: DELETION_GRACE_DAYS },
+    metadata: {
+      reason,
+      scheduledFor: result.scheduledFor,
+      graceDays: DELETION_GRACE_DAYS,
+      targetRole: target.role,
+    },
   });
-  return { ...result, graceDays: DELETION_GRACE_DAYS };
+  return { ...result, graceDays: DELETION_GRACE_DAYS, role: target.role };
 }
 
 // Enforces who may change whose status: nobody changes their own, only admins touch staff

@@ -3,6 +3,7 @@
 
 import { SubscriptionEntitlement } from '../models/SubscriptionEntitlement.js';
 import { User } from '../models/User.js';
+import { recordDeletionScheduled } from './accountDeletionLedger.service.js';
 import { endUserSockets } from './realtime.service.js';
 import { presentEntitlement } from './subscription.service.js';
 import { revokeAllUserTokens } from './token.service.js';
@@ -19,13 +20,26 @@ async function hasActiveStoreSubscription(userId) {
 
 // Schedules deletion (idempotent: a repeated request keeps the first date), signs the member out
 // everywhere and returns { status, scheduledFor, activeStoreSubscription }.
-export async function requestDeletion(userId, { reason, feedback }) {
+// Optional `scheduledBy: { id, role }` marks an admin-initiated schedule on the ledger.
+export async function requestDeletion(userId, { reason, feedback, scheduledBy = null }) {
   const scheduledFor = new Date(Date.now() + DELETION_GRACE_DAYS * DAY_MS);
-  await User.updateOne(
+  const requestedAt = new Date();
+  const updated = await User.updateOne(
     { _id: userId, 'deletion.status': { $ne: 'SCHEDULED' } },
-    { $set: { deletion: { status: 'SCHEDULED', requestedAt: new Date(), scheduledFor, reason, feedback } } },
+    { $set: { deletion: { status: 'SCHEDULED', requestedAt, scheduledFor, reason, feedback } } },
   );
   const user = await User.findById(userId).select('deletion').lean();
+
+  // Ledger mirrors the live schedule (including the first successful schedule only).
+  if (updated.modifiedCount > 0 || user?.deletion?.status === 'SCHEDULED') {
+    await recordDeletionScheduled(userId, {
+      reason,
+      feedback,
+      scheduledFor: user.deletion.scheduledFor,
+      requestedAt: user.deletion.requestedAt ?? requestedAt,
+      scheduledBy: updated.modifiedCount > 0 ? scheduledBy : null,
+    });
+  }
 
   await revokeAllUserTokens(userId, 'ACCOUNT_DELETED');
   endUserSockets(userId);

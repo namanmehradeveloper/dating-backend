@@ -25,6 +25,7 @@ import * as adminSubscriptions from '../services/admin/adminSubscriptions.servic
 import * as adminSupport from '../services/admin/adminSupport.service.js';
 import * as adminSwipes from '../services/admin/adminSwipes.service.js';
 import * as adminUsers from '../services/admin/adminUsers.service.js';
+import * as adminDeletions from '../services/admin/adminDeletions.service.js';
 import * as adminLoginHistory from '../services/admin/adminLoginHistory.service.js';
 import * as adminVerifications from '../services/admin/adminVerifications.service.js';
 import * as auditService from '../services/audit.service.js';
@@ -119,6 +120,43 @@ export async function scheduleUserDeletion(req, res) {
 export async function changeUserStatus(req, res) {
   const change = validators.validateStatusChange(req.body);
   return ApiResponse.ok(res, await adminUsers.changeUserStatus(req.user, req.params.userId, change));
+}
+
+// ---- Deletion management ----
+
+// GET /admin/deletion-management/stats
+export async function getDeletionStats(req, res) {
+  return ApiResponse.ok(res, await adminDeletions.getDeletionStats());
+}
+
+// GET /admin/deletion-management
+export async function listDeletionRecords(req, res) {
+  const filters = validators.validateDeletionListQuery(req.query);
+  return ApiResponse.ok(
+    res,
+    await adminDeletions.listDeletionRecords(filters, parsePagination(req.query), req.user.role),
+  );
+}
+
+// GET /admin/deletion-management/:recordId
+export async function getDeletionRecord(req, res) {
+  return ApiResponse.ok(res, await adminDeletions.getDeletionRecordDetail(req.params.recordId, req.user.role));
+}
+
+// POST /admin/deletion-management/:recordId/retry
+export async function retryDeletionRecord(req, res) {
+  return ApiResponse.ok(res, await adminDeletions.retryFailedDeletion(req.user, req.params.recordId));
+}
+
+// POST /admin/deletion-management/:recordId/cancel
+export async function cancelDeletionRecord(req, res) {
+  return ApiResponse.ok(res, await adminDeletions.cancelScheduledDeletion(req.user, req.params.recordId));
+}
+
+// POST /admin/deletion-management/:recordId/purge — Super Admin force purge (confirm required).
+export async function forcePurgeDeletionRecord(req, res) {
+  const body = validators.validateForcePurge(req.body);
+  return ApiResponse.ok(res, await adminDeletions.forcePurgeDeletion(req.user, req.params.recordId, body));
 }
 
 // ---- Reports ----
@@ -402,6 +440,12 @@ export async function listStaffSessions(req, res) {
 export async function forceStaffLogout(req, res) {
   const input = validators.validateStaffForceLogout(req.body);
   return ApiResponse.ok(res, await adminStaff.forceStaffLogout(req.user, req.params.userId, input));
+}
+
+export async function deleteStaff(req, res) {
+  const twoFactorCode =
+    req.body && typeof req.body.twoFactorCode === 'string' ? req.body.twoFactorCode.trim() : undefined;
+  return ApiResponse.ok(res, await adminStaff.deleteStaff(req.user, req.params.userId, { twoFactorCode }));
 }
 
 export async function listStaffActivity(req, res) {

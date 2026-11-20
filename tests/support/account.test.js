@@ -81,8 +81,12 @@ describe('account deletion', () => {
     const media = await Media.findById(upload.body.data.id);
 
     await requestDeletion(member);
-    expect(await purgeDueAccounts()).toBe(0);
-    expect(await purgeDueAccounts(new Date(Date.now() + 15 * 86400000))).toBe(1);
+    expect(await purgeDueAccounts()).toMatchObject({ erased: 0, failed: 0, total: 0 });
+    expect(await purgeDueAccounts(new Date(Date.now() + 15 * 86400000))).toMatchObject({
+      erased: 1,
+      failed: 0,
+      total: 1,
+    });
 
     expect(await User.exists({ _id: member.id })).toBeNull();
     expect(await Profile.exists({ userId: member.id })).toBeNull();

@@ -1,6 +1,7 @@
 // Imports every model in one place so their indexes are registered before the server starts.
 
 export { User } from './User.js';
+export { AccountDeletionRecord } from './AccountDeletionRecord.js';
 export { Profile } from './Profile.js';
 export { OtpSession } from './OtpSession.js';
 export { RefreshToken } from './RefreshToken.js';

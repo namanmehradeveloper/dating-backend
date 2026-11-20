@@ -158,6 +158,29 @@ export function validateUserDeletion(body) {
   return { reason };
 }
 
+// GET /admin/deletion-management?tab=&q=&source=
+export function validateDeletionListQuery(query) {
+  const details = [];
+  const filters = {
+    tab: readEnumFilter(details, query, 'tab', ['scheduled', 'ready', 'purged', 'failed']) ?? 'scheduled',
+    q: readTextFilter(details, query, 'q', 100),
+    source: readEnumFilter(details, query, 'source', ['MEMBER', 'ADMIN']),
+  };
+  throwIfInvalid(details);
+  return filters;
+}
+
+// POST /admin/deletion-management/:recordId/purge: { confirm: true }.
+export function validateForcePurge(body) {
+  requireObjectBody(body);
+  const details = [];
+  if (body.confirm !== true) {
+    details.push({ field: 'confirm', reason: 'REQUIRED' });
+  }
+  throwIfInvalid(details);
+  return { confirm: true };
+}
+
 // GET /admin/users/:userId/reports?direction=against|by
 export function validateUserReportsQuery(query) {
   const details = [];

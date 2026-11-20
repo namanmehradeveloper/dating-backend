@@ -10,6 +10,7 @@ import { Profile } from '../models/Profile.js';
 import { User } from '../models/User.js';
 import { calculateAge, MINIMUM_AGE } from '../utils/age.js';
 import { ApiError } from '../utils/ApiError.js';
+import { recordDeletionCancelled } from './accountDeletionLedger.service.js';
 import { assertAccountUsable } from './accountStatus.service.js';
 import { verifyOtp } from './otp.service.js';
 import { endUserSockets } from './realtime.service.js';
@@ -34,6 +35,7 @@ async function cancelPendingDeletion(user) {
   if (user.deletion?.status !== 'SCHEDULED') return;
   await User.updateOne({ _id: user._id }, { $set: { deletion: { status: 'NONE' } } });
   user.deletion = { status: 'NONE' };
+  await recordDeletionCancelled(user._id, { cancelReason: 'LOGIN' });
 }
 
 // Runs the checks shared by every sign-in, then issues tokens.

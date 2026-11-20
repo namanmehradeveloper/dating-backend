@@ -34,6 +34,15 @@ router.get('/users/:userId/export', can('USERS', 'DELETE'), adminController.expo
 router.post('/users/:userId/deletion', can('USERS', 'DELETE'), adminController.scheduleUserDeletion);
 router.patch('/users/:userId/status', can('USERS', 'EDIT'), adminController.changeUserStatus);
 
+// ---- Deletion management (ledger / monitoring; scheduling stays on /users/:id/deletion) ----
+
+router.get('/deletion-management/stats', can('DELETION_MANAGEMENT', 'VIEW'), adminController.getDeletionStats);
+router.get('/deletion-management', can('DELETION_MANAGEMENT', 'VIEW'), adminController.listDeletionRecords);
+router.get('/deletion-management/:recordId', can('DELETION_MANAGEMENT', 'VIEW'), adminController.getDeletionRecord);
+router.post('/deletion-management/:recordId/retry', can('DELETION_MANAGEMENT', 'EDIT'), adminController.retryDeletionRecord);
+router.post('/deletion-management/:recordId/cancel', can('DELETION_MANAGEMENT', 'DELETE'), adminController.cancelDeletionRecord);
+router.post('/deletion-management/:recordId/purge', can('DELETION_MANAGEMENT', 'DELETE'), adminController.forcePurgeDeletionRecord);
+
 // ---- Reports ----
 
 router.get('/reports', can('REPORTS', 'VIEW'), adminController.listReports);
@@ -116,6 +125,7 @@ router.get('/staff/:userId/activity', can('STAFF', 'VIEW'), adminController.list
 router.patch('/staff/:userId/role', can('STAFF', 'EDIT'), adminController.updateStaffRole);
 router.patch('/staff/:userId/status', can('STAFF', 'EDIT'), adminController.updateStaffStatus);
 router.post('/staff/:userId/force-logout', can('STAFF', 'EDIT'), adminController.forceStaffLogout);
+router.delete('/staff/:userId', can('STAFF', 'DELETE'), adminController.deleteStaff);
 
 router.post('/me/2fa/setup', adminController.beginTwoFactorSetup);
 router.post('/me/2fa/confirm', adminController.confirmTwoFactorSetup);

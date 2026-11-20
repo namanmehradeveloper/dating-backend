@@ -54,9 +54,33 @@ export async function ensureSystemRoles() {
 
       const existing = await AdminRole.findOne({ slug: definition.slug }).lean();
       const storedCount = existing?.permissions?.length ?? 0;
-      // Only seed/repair when the role is missing or has an empty matrix — never overwrite
-      // intentional permission edits (including reduced system-role matrices).
-      const needsPermissionSeed = !existing || storedCount === 0;
+      // Full catalog only when missing/empty. Otherwise append newly added catalog modules
+      // and missing catalog actions on existing modules (intentional removals of non-catalog
+      // extras are kept; catalog defaults can grow).
+      let permissionsUpdate;
+      if (!existing || storedCount === 0) {
+        permissionsUpdate = definition.permissions;
+      } else {
+        const catalogByModule = new Map(definition.permissions.map((entry) => [entry.module, entry.actions]));
+        let changed = false;
+        const next = existing.permissions.map((entry) => {
+          const catalogActions = catalogByModule.get(entry.module);
+          if (!catalogActions) return entry;
+          const haveActions = new Set(entry.actions ?? []);
+          const missingActions = catalogActions.filter((action) => !haveActions.has(action));
+          if (missingActions.length === 0) return entry;
+          changed = true;
+          return { module: entry.module, actions: [...(entry.actions ?? []), ...missingActions] };
+        });
+        const haveModules = new Set(existing.permissions.map((entry) => entry.module));
+        const missingModules = definition.permissions.filter((entry) => !haveModules.has(entry.module));
+        if (missingModules.length > 0) {
+          changed = true;
+          permissionsUpdate = [...next, ...missingModules];
+        } else if (changed) {
+          permissionsUpdate = next;
+        }
+      }
 
       await AdminRole.updateOne(
         { slug: definition.slug },
@@ -67,11 +91,11 @@ export async function ensureSystemRoles() {
             isSystem: true,
             isActive: true,
             rank: definition.rank,
-            ...(needsPermissionSeed ? { permissions: definition.permissions } : {}),
+            ...(permissionsUpdate ? { permissions: permissionsUpdate } : {}),
           },
           $setOnInsert: {
             slug: definition.slug,
-            ...(needsPermissionSeed ? {} : { permissions: definition.permissions }),
+            ...(permissionsUpdate ? {} : { permissions: definition.permissions }),
           },
         },
         { upsert: true },
@@ -164,4 +188,34 @@ export function staffRoleFilter() {
 
 export async function countAdminTier() {
   return User.countDocuments({ role: { $in: ADMIN_TIER_ROLES } });
+}
+
+// Active Super Admins: role SUPER_ADMIN, status ACTIVE, not already scheduled for deletion.
+export async function countActiveSuperAdmins({ excludeUserId = null } = {}) {
+  const filter = {
+    role: 'SUPER_ADMIN',
+    status: 'ACTIVE',
+    $or: [{ 'deletion.status': { $exists: false } }, { 'deletion.status': { $ne: 'SCHEDULED' } }],
+  };
+  if (excludeUserId) filter._id = { $ne: excludeUserId };
+  return User.countDocuments(filter);
+}
+
+// Blocks demotion / suspension / deletion / schedule / force-purge when no other active
+// Super Admin would remain. Pass `includeScheduledTarget: true` for irreversible erase of an
+// account that is already on the deletion ledger (scheduled targets are otherwise skipped).
+export async function assertNotLastActiveSuperAdmin(
+  target,
+  { actionLabel = 'modify', includeScheduledTarget = false } = {},
+) {
+  if (!target || target.role !== 'SUPER_ADMIN') return;
+  if (!includeScheduledTarget) {
+    if (target.status !== 'ACTIVE') return;
+    if (target.deletion?.status === 'SCHEDULED') return;
+  }
+  const targetId = target._id ?? target.id;
+  const others = await countActiveSuperAdmins({ excludeUserId: targetId });
+  if (others < 1) {
+    throw ApiError.conflict(`Cannot ${actionLabel} the last active Super Admin.`);
+  }
 }

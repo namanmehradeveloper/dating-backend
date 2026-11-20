@@ -9,6 +9,7 @@ import { BCRYPT_ROUNDS } from '../auth.service.js';
 import { recordAudit } from '../audit.service.js';
 import {
   assertCanManageTargetRole,
+  assertNotLastActiveSuperAdmin,
   countAdminTier,
   ensureSystemRoles,
   getPermissionsForRole,
@@ -150,6 +151,9 @@ export async function updateStaffRole(actor, userId, { role, twoFactorCode }) {
     const adminCount = await countAdminTier();
     if (adminCount <= 1) throw ApiError.conflict('Cannot demote the last admin.');
   }
+  if (target.role === 'SUPER_ADMIN' && role !== 'SUPER_ADMIN') {
+    await assertNotLastActiveSuperAdmin(target, { actionLabel: 'demote' });
+  }
 
   await User.updateOne({ _id: userId }, { $set: { role } });
   await revokeAllUserTokens(userId, 'ROLE_CHANGED');
@@ -182,6 +186,9 @@ export async function updateStaffStatus(actor, userId, { status, reason, twoFact
     const adminCount = await countAdminTier();
     if (adminCount <= 1) throw ApiError.conflict('Cannot suspend the last admin.');
   }
+  if (status !== 'ACTIVE') {
+    await assertNotLastActiveSuperAdmin(target, { actionLabel: 'suspend' });
+  }
 
   if (status === 'ACTIVE') {
     await User.updateOne(
@@ -206,6 +213,36 @@ export async function updateStaffStatus(actor, userId, { status, reason, twoFact
   });
 
   return getStaff(actor, userId);
+}
+
+// DELETE /admin/staff/:userId — permanently remove a staff account (not self, not last admin).
+export async function deleteStaff(actor, userId, { twoFactorCode } = {}) {
+  await assertStaffTwoFactor(actor, twoFactorCode);
+  if (actor.id === userId) throw ApiError.forbidden('You cannot delete your own account.');
+
+  const target = await User.findById(userId).lean();
+  if (!target || target.role === 'USER') throw ApiError.notFound();
+  await assertCanManageTargetRole(actor.role, target.role);
+
+  if (isAdminTier(target.role)) {
+    const adminCount = await countAdminTier();
+    if (adminCount <= 1) throw ApiError.conflict('Cannot delete the last admin.');
+  }
+  await assertNotLastActiveSuperAdmin(target, { actionLabel: 'delete' });
+
+  await revokeAllUserTokens(userId, 'ACCOUNT_DELETED');
+  endUserSockets(userId);
+  await RefreshToken.deleteMany({ userId });
+  await User.deleteOne({ _id: userId });
+
+  await recordAudit(actor, {
+    action: 'STAFF_DELETED',
+    targetType: 'USER',
+    targetId: userId,
+    metadata: { email: target.email ?? null, role: target.role },
+  });
+
+  return { deleted: true, userId };
 }
 
 // GET /admin/staff/:userId/sessions

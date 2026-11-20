@@ -24,6 +24,7 @@ export const PERMISSION_MODULES = [
   'FRAUD',
   'CALLS',
   'MONITORING',
+  'DELETION_MANAGEMENT',
   'SETTINGS',
   'AUDIT_LOGS',
   'STAFF',
@@ -80,7 +81,7 @@ export const SYSTEM_ROLE_DEFINITIONS = [
       ...allModules(ALL),
       // DELETE allowed for custom roles only — system role deletion stays blocked in adminRoles.service.
       ROLES: ALL,
-      STAFF: READ_WRITE,
+      STAFF: ALL,
     }),
   },
   {
@@ -103,6 +104,7 @@ export const SYSTEM_ROLE_DEFINITIONS = [
       FRAUD: MODERATE,
       NOTIFICATIONS: READ,
       CMS: READ,
+      DELETION_MANAGEMENT: READ,
     }),
   },
   {
@@ -117,6 +119,7 @@ export const SYSTEM_ROLE_DEFINITIONS = [
       SUPPORT: ALL,
       REPORTS: READ,
       VERIFICATIONS: READ,
+      DELETION_MANAGEMENT: READ,
     }),
   },
   {
@@ -164,6 +167,7 @@ export const SYSTEM_ROLE_DEFINITIONS = [
       SWIPES: READ,
       MESSAGING: READ,
       MONITORING: READ,
+      DELETION_MANAGEMENT: READ,
     }),
   },
 ];
