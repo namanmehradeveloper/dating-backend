@@ -2,7 +2,7 @@
 
 import { Coupon, COUPON_TIERS, COUPON_TYPES } from '../../models/Coupon.js';
 import { ApiError } from '../../utils/ApiError.js';
-import { buildPage, getAfterCursorFilter, getPageSort } from '../../utils/pagination.js';
+import { pickPageMeta, queryPage } from '../../utils/pagination.js';
 import { recordAudit } from '../audit.service.js';
 
 function presentCoupon(doc) {
@@ -24,14 +24,13 @@ function presentCoupon(doc) {
 }
 
 // GET /admin/coupons
-export async function listCoupons(filters, { limit, cursor }) {
+export async function listCoupons(filters, pagination) {
   const query = {};
   if (filters.isActive !== undefined) query.isActive = filters.isActive;
   if (filters.q) query.code = new RegExp(filters.q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
 
-  const docs = await Coupon.find({ ...query, ...getAfterCursorFilter(cursor) }).sort(getPageSort()).limit(limit + 1).lean();
-  const page = buildPage(docs, limit);
-  return { items: page.items.map(presentCoupon), nextCursor: page.nextCursor };
+  const { docs, ...meta } = await queryPage(Coupon, query, pagination);
+  return { items: docs.map(presentCoupon), ...pickPageMeta(meta) };
 }
 
 // POST /admin/coupons

@@ -8,7 +8,16 @@ import { Profile } from '../../models/Profile.js';
 import { Report } from '../../models/Report.js';
 import { User } from '../../models/User.js';
 import { ApiError } from '../../utils/ApiError.js';
-import { buildPage, getAfterCursorFilter, getPageSort, mergeFilters } from '../../utils/pagination.js';
+import {
+  buildPage,
+  finishOffsetPage,
+  getAfterCursorFilter,
+  getPageSort,
+  mergeFilters,
+  paginationMeta,
+  pickPageMeta,
+  queryPage,
+} from '../../utils/pagination.js';
 import { isValidId } from '../../validators/common.js';
 import { recordAudit } from '../audit.service.js';
 import { endMatch } from '../match.service.js';
@@ -123,10 +132,11 @@ async function inactiveCutoffDate() {
 }
 
 // GET /admin/matches — newest matches first, with both user cards and messageCount.
-export async function listMatches(filters, { limit, cursor }) {
+export async function listMatches(filters, pagination) {
   const query = {};
   const now = new Date();
   const inactiveCutoff = await inactiveCutoffDate();
+  const { limit, cursor, skip, mode } = pagination;
 
   if (filters.status) query.status = filters.status;
   if (filters.algorithmVersion) query.algorithmVersion = filters.algorithmVersion;
@@ -148,45 +158,90 @@ export async function listMatches(filters, { limit, cursor }) {
     const resolved = await resolveSearchUserIds(filters.q);
     if (resolved.matchId) query._id = resolved.matchId;
     else if (resolved.userIds?.length) query.userIds = { $in: resolved.userIds };
-    else return { items: [], nextCursor: null };
+    else {
+      return {
+        items: [],
+        ...pickPageMeta({
+          nextCursor: null,
+          ...paginationMeta({ page: pagination.page ?? 1, limit: pagination.limit, total: 0 }),
+        }),
+      };
+    }
   }
 
-  const cursorFilter = getAfterCursorFilter(cursor, 'matchedAt');
+  const inactiveAfterLookup = [
+    {
+      $lookup: {
+        from: 'messages',
+        localField: 'conversationId',
+        foreignField: 'conversationId',
+        as: 'msgs',
+        pipeline: [{ $limit: 1 }],
+      },
+    },
+    {
+      $match: {
+        msgs: { $size: 0 },
+        matchedAt: { $lt: inactiveCutoff },
+      },
+    },
+  ];
+
   let docs;
+  let pageMeta;
+
   if (filters.bucket === 'inactive') {
-    const pipeline = [
-      { $match: mergeFilters(query, { status: 'ACTIVE' }, cursorFilter) },
-      {
-        $lookup: {
-          from: 'messages',
-          localField: 'conversationId',
-          foreignField: 'conversationId',
-          as: 'msgs',
-          pipeline: [{ $limit: 1 }],
+    const baseMatch = mergeFilters(query, { status: 'ACTIVE' });
+    if (mode === 'offset') {
+      const [facet] = await Match.aggregate([
+        { $match: baseMatch },
+        ...inactiveAfterLookup,
+        {
+          $facet: {
+            items: [{ $sort: getPageSort('matchedAt') }, { $skip: skip }, { $limit: limit }],
+            total: [{ $count: 'count' }],
+          },
         },
-      },
-      {
-        $match: {
-          msgs: { $size: 0 },
-          matchedAt: { $lt: inactiveCutoff },
-        },
-      },
-      { $sort: getPageSort('matchedAt') },
-      { $limit: limit + 1 },
-    ];
-    docs = await Match.aggregate(pipeline);
+      ]);
+      docs = facet?.items ?? [];
+      const total = facet?.total?.[0]?.count ?? 0;
+      const offsetPage = finishOffsetPage(docs, pagination, total);
+      pageMeta = { ...offsetPage };
+      docs = offsetPage.docs;
+      delete pageMeta.docs;
+    } else {
+      const cursorFilter = getAfterCursorFilter(cursor, 'matchedAt');
+      docs = await Match.aggregate([
+        { $match: mergeFilters(baseMatch, cursorFilter) },
+        ...inactiveAfterLookup,
+        { $sort: getPageSort('matchedAt') },
+        { $limit: limit + 1 },
+      ]);
+      const built = buildPage(docs, limit, 'matchedAt');
+      docs = built.items;
+      const totalRows = await Match.aggregate([{ $match: baseMatch }, ...inactiveAfterLookup, { $count: 'count' }]);
+      const total = totalRows[0]?.count ?? 0;
+      pageMeta = {
+        nextCursor: built.nextCursor,
+        total,
+        page: 1,
+        pageSize: limit,
+        totalPages: Math.max(1, Math.ceil(total / limit) || 1),
+        hasMore: Boolean(built.nextCursor),
+        hasPrev: Boolean(cursor),
+      };
+    }
   } else {
-    docs = await Match.find(mergeFilters(query, cursorFilter))
-      .sort(getPageSort('matchedAt'))
-      .limit(limit + 1)
-      .lean();
+    const baseFilter = mergeFilters(query);
+    const { docs: matchDocs, ...meta } = await queryPage(Match, baseFilter, pagination, { dateField: 'matchedAt' });
+    docs = matchDocs;
+    pageMeta = meta;
   }
 
-  const page = buildPage(docs, limit, 'matchedAt');
-  const countByConversation = await messageCountsFor(page.items.map((match) => match.conversationId).filter(Boolean));
-  const cardFor = await loadUserCards(page.items.flatMap((match) => match.userIds));
+  const countByConversation = await messageCountsFor(docs.map((match) => match.conversationId).filter(Boolean));
+  const cardFor = await loadUserCards(docs.flatMap((match) => match.userIds));
 
-  let items = page.items.map((match) =>
+  let items = docs.map((match) =>
     presentMatchRow(match, cardFor, countByConversation.get(match.conversationId) ?? 0, inactiveCutoff),
   );
 
@@ -194,7 +249,7 @@ export async function listMatches(filters, { limit, cursor }) {
     items = items.filter((item) => item.lifecycle === 'active');
   }
 
-  return { items, nextCursor: page.nextCursor };
+  return { items, ...pickPageMeta(pageMeta) };
 }
 
 // GET /admin/matches/stats?days=
@@ -443,7 +498,7 @@ export async function listSuspiciousMatches() {
 }
 
 // GET /admin/matches/reported
-export async function listReportedMatches({ limit, cursor } = { limit: 20, cursor: null }) {
+export async function listReportedMatches(pagination = { mode: 'cursor', limit: 20, page: 1, skip: 0, cursor: null }) {
   const openStatuses = ['OPEN', 'IN_REVIEW'];
   const reports = await Report.find({ status: { $in: openStatuses } })
     .sort({ createdAt: -1 })
@@ -460,23 +515,24 @@ export async function listReportedMatches({ limit, cursor } = { limit: 20, curso
     pairKeys.add(pairKey);
   }
 
-  if (pairKeys.size === 0) return { items: [], nextCursor: null };
+  if (pairKeys.size === 0) {
+    return {
+      items: [],
+      ...pickPageMeta({
+        nextCursor: null,
+        ...paginationMeta({ page: pagination.page ?? 1, limit: pagination.limit, total: 0 }),
+      }),
+    };
+  }
 
-  const matches = await Match.find({
-    pairKey: { $in: [...pairKeys] },
-    ...getAfterCursorFilter(cursor, 'matchedAt'),
-  })
-    .sort(getPageSort('matchedAt'))
-    .limit(limit + 1)
-    .lean();
-
-  const page = buildPage(matches, limit, 'matchedAt');
-  const cardFor = await loadUserCards(page.items.flatMap((match) => match.userIds));
-  const countByConversation = await messageCountsFor(page.items.map((match) => match.conversationId).filter(Boolean));
+  const baseFilter = { pairKey: { $in: [...pairKeys] } };
+  const { docs, ...meta } = await queryPage(Match, baseFilter, pagination, { dateField: 'matchedAt' });
+  const cardFor = await loadUserCards(docs.flatMap((match) => match.userIds));
+  const countByConversation = await messageCountsFor(docs.map((match) => match.conversationId).filter(Boolean));
   const inactiveCutoff = await inactiveCutoffDate();
 
   return {
-    items: page.items.map((match) => {
+    items: docs.map((match) => {
       const relatedReports = reportByPair.get(match.pairKey) ?? [];
       return {
         ...presentMatchRow(match, cardFor, countByConversation.get(match.conversationId) ?? 0, inactiveCutoff),
@@ -492,7 +548,7 @@ export async function listReportedMatches({ limit, cursor } = { limit: 20, curso
         })),
       };
     }),
-    nextCursor: page.nextCursor,
+    ...pickPageMeta(meta),
   };
 }
 

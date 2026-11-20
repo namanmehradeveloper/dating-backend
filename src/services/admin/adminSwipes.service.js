@@ -6,7 +6,7 @@ import { LIKE_ACTIONS, SWIPE_ACTIONS, Swipe } from '../../models/Swipe.js';
 import { SubscriptionEntitlement } from '../../models/SubscriptionEntitlement.js';
 import { User } from '../../models/User.js';
 import { ApiError } from '../../utils/ApiError.js';
-import { buildPage, getAfterCursorFilter, getPageSort } from '../../utils/pagination.js';
+import { pickPageMeta, queryPage } from '../../utils/pagination.js';
 import { recordAudit } from '../audit.service.js';
 import { getEditableSettings, getSetting, saveSettings } from '../settings.service.js';
 import { isPremium, presentEntitlement } from '../subscription.service.js';
@@ -217,7 +217,7 @@ export async function listSwipeAbuse() {
 }
 
 // GET /admin/swipes?userId=&action=&direction=sent|received
-export async function listSwipes(filters, { limit, cursor }) {
+export async function listSwipes(filters, pagination) {
   if (!filters.userId) throw ApiError.validation([{ field: 'userId', reason: 'REQUIRED' }]);
   if (!(await User.exists({ _id: filters.userId }))) throw ApiError.notFound();
 
@@ -226,12 +226,11 @@ export async function listSwipes(filters, { limit, cursor }) {
   else query.userId = filters.userId;
   if (filters.action) query.action = filters.action;
 
-  const docs = await Swipe.find({ ...query, ...getAfterCursorFilter(cursor) }).sort(getPageSort()).limit(limit + 1).lean();
-  const page = buildPage(docs, limit);
-  const cardFor = await loadUserCards(page.items.flatMap((swipe) => [swipe.userId, swipe.targetUserId]));
+  const { docs, ...meta } = await queryPage(Swipe, query, pagination);
+  const cardFor = await loadUserCards(docs.flatMap((swipe) => [swipe.userId, swipe.targetUserId]));
 
   return {
-    items: page.items.map((swipe) => ({
+    items: docs.map((swipe) => ({
       id: swipe._id,
       action: swipe.action,
       direction: filters.direction === 'received' ? 'received' : 'sent',
@@ -240,7 +239,7 @@ export async function listSwipes(filters, { limit, cursor }) {
       matchId: swipe.matchId ?? null,
       createdAt: swipe.createdAt,
     })),
-    nextCursor: page.nextCursor,
+    ...pickPageMeta(meta),
   };
 }
 

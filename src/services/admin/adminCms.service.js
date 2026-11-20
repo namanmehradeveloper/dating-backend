@@ -2,7 +2,7 @@
 
 import { CmsContent, CMS_STATUSES, CMS_TYPES } from '../../models/CmsContent.js';
 import { ApiError } from '../../utils/ApiError.js';
-import { buildPage, getAfterCursorFilter, getPageSort } from '../../utils/pagination.js';
+import { pickPageMeta, queryPage } from '../../utils/pagination.js';
 import { recordAudit } from '../audit.service.js';
 
 function presentCms(doc) {
@@ -22,7 +22,7 @@ function presentCms(doc) {
 }
 
 // GET /admin/cms
-export async function listCms(filters, { limit, cursor }) {
+export async function listCms(filters, pagination) {
   const query = {};
   if (filters.type) query.type = filters.type;
   if (filters.status) query.status = filters.status;
@@ -32,9 +32,8 @@ export async function listCms(filters, { limit, cursor }) {
     query.$or = [{ title: pattern }, { slug: pattern }];
   }
 
-  const docs = await CmsContent.find({ ...query, ...getAfterCursorFilter(cursor) }).sort(getPageSort()).limit(limit + 1).lean();
-  const page = buildPage(docs, limit);
-  return { items: page.items.map(presentCms), nextCursor: page.nextCursor };
+  const { docs, ...meta } = await queryPage(CmsContent, query, pagination);
+  return { items: docs.map(presentCms), ...pickPageMeta(meta) };
 }
 
 // GET /admin/cms/:id

@@ -8,7 +8,14 @@ import { User } from '../../models/User.js';
 import { calculateAge, latestBirthDateForAge, MINIMUM_AGE } from '../../utils/age.js';
 import { ApiError } from '../../utils/ApiError.js';
 import { buildFileUrl } from '../../utils/fileUrls.js';
-import { buildPage, encodeCursor, getAfterCursorFilter, getPageSort } from '../../utils/pagination.js';
+import {
+  encodeCursor,
+  getAfterCursorFilter,
+  getPageSort,
+  paginationMeta,
+  pickPageMeta,
+  queryPage,
+} from '../../utils/pagination.js';
 import { isValidId } from '../../validators/common.js';
 import { recordAudit } from '../audit.service.js';
 import { BCRYPT_ROUNDS } from '../auth.service.js';
@@ -260,26 +267,47 @@ export async function getProfileStats() {
 }
 
 // GET /admin/profiles — newest profiles first.
-export async function listProfiles(filters, { limit, cursor }) {
+export async function listProfiles(filters, pagination) {
   const now = new Date();
   const baseFilter = await buildListFilter(filters, now);
   const needsCompletenessFilter = filters.minCompleteness !== undefined || filters.maxCompleteness !== undefined;
-  const fetchLimit = needsCompletenessFilter ? Math.min(Math.max(limit * 5, 40), 120) : limit;
+  const { limit, cursor, skip, mode } = pagination;
 
-  const docs = await Profile.find({ ...baseFilter, ...getAfterCursorFilter(cursor) })
-    .sort(getPageSort())
-    .limit(fetchLimit + 1)
-    .lean();
+  let pageItems;
+  let pageMeta;
 
-  const matched = needsCompletenessFilter
-    ? docs.filter((profile) => matchesCompletenessFilter(profile, filters))
-    : docs;
-  const pageItems = matched.slice(0, limit);
-  const hasMore = matched.length > limit || docs.length > fetchLimit;
-  const nextCursor =
-    hasMore && pageItems.length > 0
-      ? encodeCursor(pageItems[pageItems.length - 1].createdAt, pageItems[pageItems.length - 1]._id)
-      : null;
+  if (needsCompletenessFilter && mode === 'offset') {
+    // Completeness is scored in-process; scan a bounded window so we never load the full collection.
+    const scanned = await Profile.find(baseFilter).sort(getPageSort()).limit(500).lean();
+    const filtered = scanned.filter((profile) => matchesCompletenessFilter(profile, filters));
+    pageItems = filtered.slice(skip, skip + limit);
+    pageMeta = { nextCursor: null, ...paginationMeta({ page: pagination.page ?? 1, limit, total: filtered.length }) };
+  } else if (needsCompletenessFilter) {
+    const fetchLimit = Math.min(Math.max(limit * 5, 40), 120);
+    const docs = await Profile.find({ ...baseFilter, ...getAfterCursorFilter(cursor) })
+      .sort(getPageSort())
+      .limit(fetchLimit + 1)
+      .lean();
+    const matched = docs.filter((profile) => matchesCompletenessFilter(profile, filters));
+    pageItems = matched.slice(0, limit);
+    const hasMore = matched.length > limit || docs.length > fetchLimit;
+    const last = pageItems[pageItems.length - 1];
+    const nextCursor = hasMore && last ? encodeCursor(last.createdAt, last._id) : null;
+    const total = await Profile.countDocuments(baseFilter);
+    pageMeta = {
+      nextCursor,
+      total,
+      page: 1,
+      pageSize: limit,
+      totalPages: Math.max(1, Math.ceil(total / limit) || 1),
+      hasMore: Boolean(nextCursor),
+      hasPrev: Boolean(cursor),
+    };
+  } else {
+    const { docs, ...meta } = await queryPage(Profile, baseFilter, pagination);
+    pageItems = docs;
+    pageMeta = meta;
+  }
 
   const users = await User.find({ _id: { $in: pageItems.map((profile) => profile.userId) } })
     .select('email role status verificationStatus')
@@ -288,25 +316,21 @@ export async function listProfiles(filters, { limit, cursor }) {
 
   return {
     items: pageItems.map((profile) => summarizeListItem(profile, userById.get(profile.userId), now)),
-    nextCursor,
+    ...pickPageMeta(pageMeta),
   };
 }
 
 // GET /admin/profiles/photo-queue — photos awaiting moderation.
-export async function listPhotoQueue(filters, { limit, cursor }) {
+export async function listPhotoQueue(filters, pagination) {
   const status = filters.status ?? 'PENDING';
   const match = { photos: { $elemMatch: { moderationStatus: status } } };
   if (filters.q) Object.assign(match, await buildSearchFilter(filters.q));
 
-  const docs = await Profile.find({ ...match, ...getAfterCursorFilter(cursor) })
-    .sort(getPageSort())
-    .limit(limit + 1)
-    .lean();
-  const page = buildPage(docs, limit);
-  const cardFor = await loadUserCards(page.items.map((profile) => profile.userId));
+  const { docs, ...meta } = await queryPage(Profile, match, pagination);
+  const cardFor = await loadUserCards(docs.map((profile) => profile.userId));
 
   const items = [];
-  for (const profile of page.items) {
+  for (const profile of docs) {
     for (const photo of profile.photos ?? []) {
       if ((photo.moderationStatus ?? 'APPROVED') !== status) continue;
       items.push({
@@ -322,7 +346,7 @@ export async function listPhotoQueue(filters, { limit, cursor }) {
     }
   }
 
-  return { items, nextCursor: page.nextCursor };
+  return { items, ...pickPageMeta(meta) };
 }
 
 async function loadProfileOrThrow(userId) {
@@ -389,25 +413,20 @@ export async function getProfile(viewerRole, userId) {
 }
 
 // GET /admin/profiles/:userId/history — audited profile actions for this member.
-export async function getProfileHistory(userId, { limit, cursor }) {
+export async function getProfileHistory(userId, pagination) {
   const profile = await Profile.findOne({ userId }).select('_id').lean();
   if (!profile) throw ApiError.notFound();
 
-  const docs = await AuditLog.find({
+  const baseFilter = {
     targetType: 'USER',
     targetId: userId,
     action: { $in: PROFILE_AUDIT_ACTIONS },
-    ...getAfterCursorFilter(cursor),
-  })
-    .sort(getPageSort())
-    .limit(limit + 1)
-    .lean();
-
-  const page = buildPage(docs, limit);
-  const cardFor = await loadUserCards(page.items.map((log) => log.actorId));
+  };
+  const { docs, ...meta } = await queryPage(AuditLog, baseFilter, pagination);
+  const cardFor = await loadUserCards(docs.map((log) => log.actorId));
 
   return {
-    items: page.items.map((log) => ({
+    items: docs.map((log) => ({
       id: log._id,
       action: log.action,
       actor: cardFor(log.actorId),
@@ -415,7 +434,7 @@ export async function getProfileHistory(userId, { limit, cursor }) {
       metadata: log.metadata ?? {},
       createdAt: log.createdAt,
     })),
-    nextCursor: page.nextCursor,
+    ...pickPageMeta(meta),
   };
 }
 

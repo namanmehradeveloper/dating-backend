@@ -5,7 +5,7 @@ import { AccountDeletionRecord } from '../../models/AccountDeletionRecord.js';
 import { AuditLog } from '../../models/AuditLog.js';
 import { User } from '../../models/User.js';
 import { ApiError } from '../../utils/ApiError.js';
-import { buildPage, getAfterCursorFilter, getPageSort, mergeFilters } from '../../utils/pagination.js';
+import { pickPageMeta, queryPage } from '../../utils/pagination.js';
 import { isValidId } from '../../validators/common.js';
 import { eraseAccount } from '../../jobs/accountDeletion.job.js';
 import {
@@ -141,7 +141,7 @@ export async function getDeletionStats() {
 }
 
 // GET /admin/deletion-management?tab=&q=&source=&cursor=&limit=
-export async function listDeletionRecords(filters, { limit, cursor }, viewerRole) {
+export async function listDeletionRecords(filters, pagination, viewerRole) {
   await reconcileScheduledLedgers();
   const now = new Date();
   const tab = filters.tab || 'scheduled';
@@ -164,22 +164,15 @@ export async function listDeletionRecords(filters, { limit, cursor }, viewerRole
   }
 
   const direction = tab === 'scheduled' ? 'asc' : 'desc';
-  const docs = await AccountDeletionRecord.find(
-    mergeFilters(query, getAfterCursorFilter(cursor, dateField, direction)),
-  )
-    .sort(getPageSort(dateField, direction))
-    .limit(limit + 1)
-    .lean();
-
-  const page = buildPage(docs, limit, dateField);
-  const adminIds = page.items.map((row) => row.scheduledByAdminId).filter(Boolean);
+  const { docs, ...meta } = await queryPage(AccountDeletionRecord, query, pagination, { dateField, direction });
+  const adminIds = docs.map((row) => row.scheduledByAdminId).filter(Boolean);
   const cardFor = await loadUserCards(adminIds);
 
   return {
-    items: page.items.map((row) =>
+    items: docs.map((row) =>
       presentDeletionSummary(row, row.scheduledByAdminId ? cardFor(row.scheduledByAdminId) : null, viewerRole, now),
     ),
-    nextCursor: page.nextCursor,
+    ...pickPageMeta(meta),
   };
 }
 

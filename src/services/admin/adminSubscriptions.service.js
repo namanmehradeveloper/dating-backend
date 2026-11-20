@@ -6,7 +6,7 @@ import { PaymentTransaction } from '../../models/PaymentTransaction.js';
 import { SubscriptionEntitlement } from '../../models/SubscriptionEntitlement.js';
 import { User } from '../../models/User.js';
 import { ApiError } from '../../utils/ApiError.js';
-import { buildPage, getAfterCursorFilter, getPageSort } from '../../utils/pagination.js';
+import { pickPageMeta, queryPage } from '../../utils/pagination.js';
 import { getBillingStatus, presentEntitlement } from '../subscription.service.js';
 import { listPlansForAdmin, updatePlan } from '../subscriptionPlans.service.js';
 import { loadUserCards } from './adminPresenter.js';
@@ -95,9 +95,9 @@ export async function getSubscriptionStats() {
 }
 
 // GET /admin/subscriptions — every stored entitlement, newest first.
-export async function listSubscriptions({ tier, isActive, q, provider, lifecycle, environment }, { limit, cursor }) {
+export async function listSubscriptions({ tier, isActive, q, provider, lifecycle, environment }, pagination) {
   const now = new Date();
-  const conditions = [getAfterCursorFilter(cursor)];
+  const conditions = [];
 
   if (tier) conditions.push({ tier });
   if (isActive !== undefined) conditions.push(activeFilter(isActive));
@@ -130,12 +130,12 @@ export async function listSubscriptions({ tier, isActive, q, provider, lifecycle
     }
   }
 
-  const docs = await SubscriptionEntitlement.find({ $and: conditions }).sort(getPageSort()).limit(limit + 1).lean();
-  const page = buildPage(docs, limit);
-  const cardFor = await loadUserCards(page.items.map((entitlement) => entitlement.userId));
+  const baseFilter = conditions.length ? { $and: conditions } : {};
+  const { docs, ...meta } = await queryPage(SubscriptionEntitlement, baseFilter, pagination);
+  const cardFor = await loadUserCards(docs.map((entitlement) => entitlement.userId));
   return {
-    items: page.items.map((entitlement) => presentAdminEntitlement(entitlement, cardFor, now)),
-    nextCursor: page.nextCursor,
+    items: docs.map((entitlement) => presentAdminEntitlement(entitlement, cardFor, now)),
+    ...pickPageMeta(meta),
   };
 }
 

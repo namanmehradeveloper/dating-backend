@@ -4,7 +4,7 @@
 import { env } from '../../config/env.js';
 import { PaymentTransaction, PAYMENT_PROVIDERS, PAYMENT_STATUSES } from '../../models/PaymentTransaction.js';
 import { ApiError } from '../../utils/ApiError.js';
-import { buildPage, getAfterCursorFilter, getPageSort } from '../../utils/pagination.js';
+import { pickPageMeta, queryPage } from '../../utils/pagination.js';
 import { listPaymentProviders } from '../../payments/index.js';
 import { getSystemInfo } from '../settings.service.js';
 import { DASHBOARD_RANGES } from './adminDashboard.service.js';
@@ -140,8 +140,8 @@ export async function getPaymentsStats({ days } = {}) {
 }
 
 // GET /admin/payments?status=&kind=demo|real&provider=&q=
-export async function listPayments({ status, kind, provider, q, productId }, { limit, cursor }) {
-  const conditions = [getAfterCursorFilter(cursor)];
+export async function listPayments({ status, kind, provider, q, productId }, pagination) {
+  const conditions = [];
   if (status) conditions.push({ status });
   if (provider) conditions.push({ provider });
   if (productId) conditions.push({ productId });
@@ -172,10 +172,10 @@ export async function listPayments({ status, kind, provider, q, productId }, { l
     }
   }
 
-  const docs = await PaymentTransaction.find({ $and: conditions }).sort(getPageSort()).limit(limit + 1).lean();
-  const page = buildPage(docs, limit);
-  const cardFor = await loadUserCards(page.items.map((payment) => payment.userId));
-  return { items: page.items.map((payment) => presentPayment(payment, cardFor)), nextCursor: page.nextCursor };
+  const baseFilter = conditions.length ? { $and: conditions } : {};
+  const { docs, ...meta } = await queryPage(PaymentTransaction, baseFilter, pagination);
+  const cardFor = await loadUserCards(docs.map((payment) => payment.userId));
+  return { items: docs.map((payment) => presentPayment(payment, cardFor)), ...pickPageMeta(meta) };
 }
 
 // GET /admin/payments/:paymentId

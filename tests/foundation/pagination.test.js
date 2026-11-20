@@ -34,12 +34,26 @@ function toBase64Url(value) {
 
 describe('parsePagination', () => {
   it('defaults to limit 20 and no cursor', () => {
-    expect(parsePagination({})).toEqual({ limit: 20, cursor: null });
-    expect(parsePagination()).toEqual({ limit: 20, cursor: null });
+    expect(parsePagination({})).toEqual({ mode: 'cursor', limit: 20, cursor: null, page: 1, skip: 0 });
+    expect(parsePagination()).toEqual({ mode: 'cursor', limit: 20, cursor: null, page: 1, skip: 0 });
   });
 
   it('treats empty values as absent (?cursor=&limit=)', () => {
-    expect(parsePagination({ cursor: '', limit: '' })).toEqual({ limit: 20, cursor: null });
+    expect(parsePagination({ cursor: '', limit: '' })).toEqual({ mode: 'cursor', limit: 20, cursor: null, page: 1, skip: 0 });
+  });
+
+  it('accepts page for offset mode and ignores cursor', () => {
+    expect(parsePagination({ page: '3', limit: '25' })).toEqual({
+      mode: 'offset',
+      limit: 25,
+      page: 3,
+      skip: 50,
+      cursor: null,
+    });
+  });
+
+  it('accepts admin maxLimit of 100', () => {
+    expect(parsePagination({ limit: '100' }, { maxLimit: 100 }).limit).toBe(100);
   });
 
   it.each([

@@ -7,7 +7,13 @@ import { User } from '../../models/User.js';
 import { VerificationRequest } from '../../models/VerificationRequest.js';
 import { ApiError } from '../../utils/ApiError.js';
 import { buildFileUrl } from '../../utils/fileUrls.js';
-import { buildPage, encodeCursor, getAfterCursorFilter, getPageSort } from '../../utils/pagination.js';
+import {
+  encodeCursor,
+  finishOffsetPage,
+  paginationMeta,
+  pickPageMeta,
+  queryPage,
+} from '../../utils/pagination.js';
 import { recordAudit } from '../audit.service.js';
 import { notifyUser } from '../notification.service.js';
 import { isValidId } from '../../validators/common.js';
@@ -49,57 +55,102 @@ function buildSortedPage(docs, limit, dateField) {
 
 // GET /admin/verifications — optionally by status; sort by submitted (createdAt) or reviewedAt.
 // reviewedAt may be null for PENDING rows, so that sort uses createdAt as a fallback via $ifNull.
-export async function listVerifications({ status, sortBy, sortDir, q }, { limit, cursor }) {
+export async function listVerifications({ status, sortBy, sortDir, q }, pagination) {
+  const { limit, cursor, skip, mode } = pagination;
   const query = status ? { status } : {};
   if (q) {
     if (isValidId(q) && q.startsWith('ver_')) query._id = q;
     else {
       const userIds = await resolveMemberIdsByQuery(q);
-      if (userIds.length === 0) return { items: [], nextCursor: null };
+      if (userIds.length === 0) {
+        return {
+          items: [],
+          ...pickPageMeta({
+            nextCursor: null,
+            ...paginationMeta({ page: pagination.page ?? 1, limit: pagination.limit, total: 0 }),
+          }),
+        };
+      }
       query.userId = userIds.length === 1 ? userIds[0] : { $in: userIds };
     }
   }
   const direction = sortDir === 'asc' ? 'asc' : 'desc';
 
-  let page;
+  let pageItems;
+  let pageMeta;
+
   if (sortBy === 'reviewedAt') {
     const order = direction === 'asc' ? 1 : -1;
-    const docs = await VerificationRequest.aggregate([
+    const baseStages = [
       { $match: query },
       { $addFields: { sortAt: { $ifNull: ['$reviewedAt', '$createdAt'] } } },
-      ...(cursor
-        ? [
-            {
-              $match: {
-                $or: [
-                  { sortAt: { [direction === 'asc' ? '$gt' : '$lt']: cursor.date } },
-                  { sortAt: cursor.date, _id: { [direction === 'asc' ? '$gt' : '$lt']: cursor.id } },
-                ],
+    ];
+
+    if (mode === 'offset') {
+      const [facet] = await VerificationRequest.aggregate([
+        ...baseStages,
+        {
+          $facet: {
+            items: [{ $sort: { sortAt: order, _id: order } }, { $skip: skip }, { $limit: limit }],
+            total: [{ $count: 'count' }],
+          },
+        },
+      ]);
+      const docs = facet?.items ?? [];
+      const total = facet?.total?.[0]?.count ?? 0;
+      pageMeta = finishOffsetPage(docs, pagination, total);
+      pageItems = pageMeta.docs;
+      delete pageMeta.docs;
+    } else {
+      const cursorOp = direction === 'asc' ? '$gt' : '$lt';
+      const docs = await VerificationRequest.aggregate([
+        ...baseStages,
+        ...(cursor
+          ? [
+              {
+                $match: {
+                  $or: [
+                    { sortAt: { [cursorOp]: cursor.date } },
+                    { sortAt: cursor.date, _id: { [cursorOp]: cursor.id } },
+                  ],
+                },
               },
-            },
-          ]
-        : []),
-      { $sort: { sortAt: order, _id: order } },
-      { $limit: limit + 1 },
-    ]);
-    page = buildSortedPage(docs, limit, 'sortAt');
+            ]
+          : []),
+        { $sort: { sortAt: order, _id: order } },
+        { $limit: limit + 1 },
+      ]);
+      const built = buildSortedPage(docs, limit, 'sortAt');
+      pageItems = built.items;
+      const total = await VerificationRequest.countDocuments(query);
+      pageMeta = {
+        nextCursor: built.nextCursor,
+        total,
+        page: 1,
+        pageSize: limit,
+        totalPages: Math.max(1, Math.ceil(total / limit) || 1),
+        hasMore: Boolean(built.nextCursor),
+        hasPrev: Boolean(cursor),
+      };
+    }
   } else {
-    const docs = await VerificationRequest.find({ ...query, ...getAfterCursorFilter(cursor, 'createdAt', direction) })
-      .sort(getPageSort('createdAt', direction))
-      .limit(limit + 1)
-      .lean();
-    page = buildPage(docs, limit, 'createdAt');
+    const { docs, ...meta } = await queryPage(VerificationRequest, query, pagination, {
+      dateField: 'createdAt',
+      direction,
+    });
+    pageItems = docs;
+    pageMeta = meta;
   }
 
   const [cardFor, selfieUrls] = await Promise.all([
-    loadUserCards(page.items.map((request) => request.userId)),
-    loadSelfieUrls(page.items),
+    loadUserCards(pageItems.map((request) => request.userId)),
+    loadSelfieUrls(pageItems),
   ]);
   return {
-    items: page.items.map((request) =>
+    items: pageItems.map((request) =>
       presentVerificationSummary(request, cardFor, selfieUrls.get(String(request._id)) ?? null),
     ),
-    nextCursor: page.nextCursor,
+    ...pickPageMeta(pageMeta),
   };
 }
 

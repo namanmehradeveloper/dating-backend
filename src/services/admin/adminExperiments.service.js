@@ -2,7 +2,7 @@
 
 import { Experiment, EXPERIMENT_STATUSES } from '../../models/Experiment.js';
 import { ApiError } from '../../utils/ApiError.js';
-import { buildPage, getAfterCursorFilter, getPageSort } from '../../utils/pagination.js';
+import { pickPageMeta, queryPage } from '../../utils/pagination.js';
 import { recordAudit } from '../audit.service.js';
 
 function presentExperiment(doc) {
@@ -23,7 +23,7 @@ function presentExperiment(doc) {
 }
 
 // GET /admin/experiments
-export async function listExperiments(filters, { limit, cursor }) {
+export async function listExperiments(filters, pagination) {
   const query = {};
   if (filters.status) query.status = filters.status;
   if (filters.q) {
@@ -31,9 +31,8 @@ export async function listExperiments(filters, { limit, cursor }) {
     query.$or = [{ name: pattern }, { key: pattern }];
   }
 
-  const docs = await Experiment.find({ ...query, ...getAfterCursorFilter(cursor) }).sort(getPageSort()).limit(limit + 1).lean();
-  const page = buildPage(docs, limit);
-  return { items: page.items.map(presentExperiment), nextCursor: page.nextCursor };
+  const { docs, ...meta } = await queryPage(Experiment, query, pagination);
+  return { items: docs.map(presentExperiment), ...pickPageMeta(meta) };
 }
 
 // GET /admin/experiments/:id

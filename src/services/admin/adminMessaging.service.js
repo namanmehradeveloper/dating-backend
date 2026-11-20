@@ -5,7 +5,7 @@ import { Conversation, CONVERSATION_STATUSES } from '../../models/Conversation.j
 import { Match } from '../../models/Match.js';
 import { Message } from '../../models/Message.js';
 import { Profile } from '../../models/Profile.js';
-import { buildPage, getAfterCursorFilter, getPageSort } from '../../utils/pagination.js';
+import { paginationMeta, pickPageMeta, queryPage } from '../../utils/pagination.js';
 import { isValidId } from '../../validators/common.js';
 import { loadUserCards } from './adminPresenter.js';
 import { DASHBOARD_RANGES } from './adminDashboard.service.js';
@@ -88,7 +88,7 @@ export async function getMessagingStats({ days } = {}) {
 }
 
 // GET /admin/messaging/conversations — who ↔ whom, counts, last sender. No message text.
-export async function listConversations(filters, { limit, cursor }) {
+export async function listConversations(filters, pagination) {
   const query = {};
   if (filters.status) query.status = filters.status;
 
@@ -97,23 +97,23 @@ export async function listConversations(filters, { limit, cursor }) {
     if (resolved.conversationId) query._id = resolved.conversationId;
     else if (resolved.matchId) query.matchId = resolved.matchId;
     else if (resolved.userIds?.length) query.participantIds = { $in: resolved.userIds };
-    else return { items: [], nextCursor: null };
+    else {
+      return {
+        items: [],
+        ...pickPageMeta({ nextCursor: null, ...paginationMeta({ page: pagination.page ?? 1, limit: pagination.limit, total: 0 }) }),
+      };
+    }
   }
 
-  const docs = await Conversation.find({ ...query, ...getAfterCursorFilter(cursor, 'lastActivityAt') })
-    .sort(getPageSort('lastActivityAt'))
-    .limit(limit + 1)
-    .lean();
-
-  const page = buildPage(docs, limit, 'lastActivityAt');
-  const conversationIds = page.items.map((row) => row._id);
+  const { docs, ...meta } = await queryPage(Conversation, query, pagination, { dateField: 'lastActivityAt' });
+  const conversationIds = docs.map((row) => row._id);
   const [countByConversation, lastById, cardFor] = await Promise.all([
     messageCountsFor(conversationIds),
-    lastMessageMetaFor(page.items.map((row) => row.lastMessageId)),
-    loadUserCards(page.items.flatMap((row) => row.participantIds)),
+    lastMessageMetaFor(docs.map((row) => row.lastMessageId)),
+    loadUserCards(docs.flatMap((row) => row.participantIds)),
   ]);
 
-  const items = page.items.map((conversation) => {
+  const items = docs.map((conversation) => {
     const last = conversation.lastMessageId ? lastById.get(conversation.lastMessageId) : null;
     const participants = conversation.participantIds.map((id) => cardFor(id));
     const [memberA, memberB] = participants;
@@ -135,5 +135,5 @@ export async function listConversations(filters, { limit, cursor }) {
     };
   });
 
-  return { items, nextCursor: page.nextCursor };
+  return { items, ...pickPageMeta(meta) };
 }

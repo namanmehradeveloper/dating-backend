@@ -4,7 +4,7 @@
 import mongoose from 'mongoose';
 import { env } from '../../config/env.js';
 import { Call, ACTIVE_CALL_STATUSES, CALL_STATUSES, CALL_TYPES } from '../../models/Call.js';
-import { buildPage, getAfterCursorFilter, getPageSort, mergeFilters } from '../../utils/pagination.js';
+import { paginationMeta, pickPageMeta, queryPage } from '../../utils/pagination.js';
 import { ApiError } from '../../utils/ApiError.js';
 import { isValidId } from '../../validators/common.js';
 import { DASHBOARD_RANGES } from './adminDashboard.service.js';
@@ -117,27 +117,27 @@ export async function getCallsStats({ days } = {}) {
 }
 
 // GET /admin/calls?type=&status=&q=
-export async function listCalls(filters, { limit, cursor }) {
+export async function listCalls(filters, pagination) {
   const query = {};
   if (filters.type) query.type = filters.type;
   if (filters.status) query.status = filters.status;
 
   if (filters.q) {
     const resolved = await resolveCallSearch(filters.q);
-    if (resolved.empty) return { items: [], nextCursor: null };
+    if (resolved.empty) {
+      return {
+        items: [],
+        ...pickPageMeta({ nextCursor: null, ...paginationMeta({ page: pagination.page ?? 1, limit: pagination.limit, total: 0 }) }),
+      };
+    }
     Object.assign(query, resolved);
   }
 
-  const docs = await Call.find(mergeFilters(query, getAfterCursorFilter(cursor, 'createdAt')))
-    .sort(getPageSort('createdAt'))
-    .limit(limit + 1)
-    .lean();
-
-  const page = buildPage(docs, limit, 'createdAt');
-  const cardFor = await loadUserCards(page.items.flatMap((row) => [row.callerId, row.calleeId]));
+  const { docs, ...meta } = await queryPage(Call, query, pagination, { dateField: 'createdAt' });
+  const cardFor = await loadUserCards(docs.flatMap((row) => [row.callerId, row.calleeId]));
   return {
-    items: page.items.map((call) => presentCall(call, cardFor)),
-    nextCursor: page.nextCursor,
+    items: docs.map((call) => presentCall(call, cardFor)),
+    ...pickPageMeta(meta),
   };
 }
 

@@ -2,7 +2,7 @@
 
 import { AuditLog } from '../models/AuditLog.js';
 import { ApiError } from '../utils/ApiError.js';
-import { buildPage, getAfterCursorFilter, getPageSort } from '../utils/pagination.js';
+import { pickPageMeta, queryPage } from '../utils/pagination.js';
 import { loadUserCards } from './admin/adminPresenter.js';
 
 // Stores one audit entry. `actor` is req.user (id and role come from the database, not the client).
@@ -40,15 +40,14 @@ function loadCardsFor(logs) {
 }
 
 // Lists audit entries, newest first, filtered by actor, target, action or target type.
-export async function listAuditLogs(filters, { limit, cursor }) {
+export async function listAuditLogs(filters, pagination) {
   const query = {};
   for (const field of ['actorId', 'targetId', 'action', 'targetType']) {
     if (filters[field]) query[field] = filters[field];
   }
-  const docs = await AuditLog.find({ ...query, ...getAfterCursorFilter(cursor) }).sort(getPageSort()).limit(limit + 1).lean();
-  const page = buildPage(docs, limit);
-  const cardFor = await loadCardsFor(page.items);
-  return { items: page.items.map((log) => presentAuditLog(log, cardFor)), nextCursor: page.nextCursor };
+  const { docs, ...meta } = await queryPage(AuditLog, query, pagination);
+  const cardFor = await loadCardsFor(docs);
+  return { items: docs.map((log) => presentAuditLog(log, cardFor)), ...pickPageMeta(meta) };
 }
 
 // Returns one audit entry.

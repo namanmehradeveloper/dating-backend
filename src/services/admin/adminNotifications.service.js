@@ -8,7 +8,7 @@ import { NotificationPreference } from '../../models/NotificationPreference.js';
 import { SubscriptionEntitlement } from '../../models/SubscriptionEntitlement.js';
 import { User } from '../../models/User.js';
 import { ApiError } from '../../utils/ApiError.js';
-import { buildPage, getAfterCursorFilter, getPageSort, mergeFilters } from '../../utils/pagination.js';
+import { pickPageMeta, queryPage } from '../../utils/pagination.js';
 import { recordAudit } from '../audit.service.js';
 import { isPushConfigured } from '../push.service.js';
 import { loadUserCards } from './adminPresenter.js';
@@ -91,16 +91,15 @@ function presentCampaign(campaign, cardFor) {
 }
 
 // GET /admin/notifications — sent campaigns, newest first.
-export async function listCampaigns(filters = {}, { limit, cursor } = {}) {
+export async function listCampaigns(filters = {}, pagination = { mode: 'cursor', limit: 20, page: 1, skip: 0, cursor: null }) {
   const query = {};
   if (filters.q) {
     const pattern = new RegExp(filters.q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
     query.$or = [{ title: pattern }, { body: pattern }, { _id: filters.q }, { targetUserId: filters.q }];
   }
-  const docs = await NotificationCampaign.find(mergeFilters(query, getAfterCursorFilter(cursor))).sort(getPageSort()).limit(limit + 1).lean();
-  const page = buildPage(docs, limit);
-  const cardFor = await loadUserCards(page.items.map((campaign) => campaign.createdBy));
-  return { items: page.items.map((campaign) => presentCampaign(campaign, cardFor)), nextCursor: page.nextCursor };
+  const { docs, ...meta } = await queryPage(NotificationCampaign, query, pagination);
+  const cardFor = await loadUserCards(docs.map((campaign) => campaign.createdBy));
+  return { items: docs.map((campaign) => presentCampaign(campaign, cardFor)), ...pickPageMeta(meta) };
 }
 
 // POST /admin/notifications — sends a campaign and returns it with the real recipient count.

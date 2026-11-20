@@ -4,7 +4,7 @@ import bcrypt from 'bcryptjs';
 import { RefreshToken } from '../../models/RefreshToken.js';
 import { User } from '../../models/User.js';
 import { ApiError } from '../../utils/ApiError.js';
-import { buildPage, getAfterCursorFilter, getPageSort } from '../../utils/pagination.js';
+import { pickPageMeta, queryPage } from '../../utils/pagination.js';
 import { BCRYPT_ROUNDS } from '../auth.service.js';
 import { recordAudit } from '../audit.service.js';
 import {
@@ -64,7 +64,7 @@ export async function getStaffStats() {
 }
 
 // GET /admin/staff — staff accounts newest first.
-export async function listStaff(filters, { limit, cursor }) {
+export async function listStaff(filters, pagination) {
   await ensureSystemRoles();
   const query = { ...staffRoleFilter() };
   if (filters.q) {
@@ -78,16 +78,12 @@ export async function listStaff(filters, { limit, cursor }) {
     query.$and = [...(query.$and ?? []), { $or: [{ 'twoFactor.enabled': false }, { twoFactor: { $exists: false } }] }];
   }
 
-  const docs = await User.find({ ...query, ...getAfterCursorFilter(cursor) })
-    .sort(getPageSort())
-    .limit(limit + 1)
-    .lean();
-  const page = buildPage(docs, limit);
-  const cardFor = await loadUserCards(page.items.map((user) => user._id));
+  const { docs, ...meta } = await queryPage(User, query, pagination);
+  const cardFor = await loadUserCards(docs.map((user) => user._id));
 
   return {
-    items: page.items.map((user) => presentStaff(user, cardFor(user._id), 'ADMIN')),
-    nextCursor: page.nextCursor,
+    items: docs.map((user) => presentStaff(user, cardFor(user._id), 'ADMIN')),
+    ...pickPageMeta(meta),
   };
 }
 
@@ -291,27 +287,22 @@ export async function forceStaffLogout(actor, userId, { reason, twoFactorCode })
 }
 
 // GET /admin/staff/:userId/activity
-export async function listStaffActivity(actor, userId, { limit, cursor }) {
+export async function listStaffActivity(actor, userId, pagination) {
   const { AuditLog } = await import('../../models/AuditLog.js');
   const target = await User.findById(userId).lean();
   if (!target || target.role === 'USER') throw ApiError.notFound();
   await assertCanManageTargetRole(actor.role, target.role);
 
-  const docs = await AuditLog.find({
+  const query = {
     $or: [
       { actorId: userId },
       { targetType: 'USER', targetId: userId, action: { $regex: /^STAFF_/ } },
     ],
-    ...getAfterCursorFilter(cursor),
-  })
-    .sort(getPageSort())
-    .limit(limit + 1)
-    .lean();
-
-  const page = buildPage(docs, limit);
-  const cardFor = await loadUserCards(page.items.map((log) => log.actorId));
+  };
+  const { docs, ...meta } = await queryPage(AuditLog, query, pagination);
+  const cardFor = await loadUserCards(docs.map((log) => log.actorId));
   return {
-    items: page.items.map((log) => ({
+    items: docs.map((log) => ({
       id: log._id,
       action: log.action,
       actor: cardFor(log.actorId),
@@ -321,7 +312,7 @@ export async function listStaffActivity(actor, userId, { limit, cursor }) {
       metadata: log.metadata ?? {},
       createdAt: log.createdAt,
     })),
-    nextCursor: page.nextCursor,
+    ...pickPageMeta(meta),
   };
 }
 

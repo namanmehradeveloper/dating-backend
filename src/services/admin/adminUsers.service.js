@@ -16,7 +16,13 @@ import { UserRiskSignal } from '../../models/UserRiskSignal.js';
 import { calculateAge, MINIMUM_AGE } from '../../utils/age.js';
 import { ApiError } from '../../utils/ApiError.js';
 import { buildFileUrl } from '../../utils/fileUrls.js';
-import { buildPage, encodeCursor, getAfterCursorFilter, getPageSort, mergeFilters } from '../../utils/pagination.js';
+import {
+  encodeCursor,
+  mergeFilters,
+  paginationMeta,
+  pickPageMeta,
+  queryPage,
+} from '../../utils/pagination.js';
 import { isValidId } from '../../validators/common.js';
 import { DELETION_GRACE_DAYS, requestDeletion } from '../account.service.js';
 import { recordAudit } from '../audit.service.js';
@@ -200,7 +206,7 @@ async function buildProfileConstraint(filters) {
 }
 
 // GET /admin/users — newest accounts first (or sorted by lastActiveAt).
-export async function listUsers(filters, { limit, cursor }, viewerRole) {
+export async function listUsers(filters, pagination, viewerRole) {
   const query = {};
   for (const field of ['status', 'role', 'verificationStatus']) {
     if (filters[field]) query[field] = filters[field];
@@ -212,21 +218,17 @@ export async function listUsers(filters, { limit, cursor }, viewerRole) {
   const activityFilter = buildActivityFilter(filters, onlineIds);
   const profileFilter = await buildProfileConstraint(filters);
   const { dateField, direction } = resolveSort(filters);
-  const cursorFilter = getAfterCursorFilter(cursor, dateField, direction);
+  const baseFilter = mergeFilters(query, searchFilter, activityFilter, profileFilter);
 
-  const docs = await User.find(mergeFilters(query, searchFilter, activityFilter, profileFilter, cursorFilter))
-    .sort(getPageSort(dateField, direction))
-    .limit(limit + 1)
-    .lean();
-  const page = buildPage(docs, limit, dateField);
-  const profiles = await Profile.find({ userId: { $in: page.items.map((user) => user._id) } })
+  const { docs, ...meta } = await queryPage(User, baseFilter, pagination, { dateField, direction });
+  const profiles = await Profile.find({ userId: { $in: docs.map((user) => user._id) } })
     .select('userId displayName photos visibilityStatus gender')
     .lean();
   const profileByUserId = new Map(profiles.map((profile) => [profile.userId, profile]));
-  const { nameCounts, signalByUser } = await loadRiskIndicators(page.items, profiles);
+  const { nameCounts, signalByUser } = await loadRiskIndicators(docs, profiles);
 
   return {
-    items: page.items.map((user) => {
+    items: docs.map((user) => {
       const profile = profileByUserId.get(user._id);
       const risk = riskFlagsFor(user._id, profile, nameCounts, signalByUser);
       return {
@@ -235,7 +237,7 @@ export async function listUsers(filters, { limit, cursor }, viewerRole) {
         ...risk,
       };
     }),
-    nextCursor: page.nextCursor,
+    ...pickPageMeta(meta),
   };
 }
 
@@ -499,54 +501,49 @@ export async function getUserDetail(userId, viewerRole) {
 }
 
 // GET /admin/users/:userId/reports — reports against the member (default) or made by them.
-export async function listUserReports(userId, { direction }, { limit, cursor }) {
+export async function listUserReports(userId, { direction }, pagination) {
   await loadUser(userId);
   const owner = direction === 'by' ? { reporterId: userId } : { targetUserId: userId };
-  const docs = await Report.find({ ...owner, ...getAfterCursorFilter(cursor) }).sort(getPageSort()).limit(limit + 1).lean();
-  const page = buildPage(docs, limit);
-  return { items: await presentReportSummaries(page.items), nextCursor: page.nextCursor };
+  const { docs, ...meta } = await queryPage(Report, owner, pagination);
+  return { items: await presentReportSummaries(docs), ...pickPageMeta(meta) };
 }
 
 // GET /admin/users/:userId/matches — the member's matches with message counts (never message text).
-export async function listUserMatches(userId, { limit, cursor }) {
+export async function listUserMatches(userId, pagination) {
   await loadUser(userId);
-  const docs = await Match.find({ userIds: userId, ...getAfterCursorFilter(cursor) }).sort(getPageSort()).limit(limit + 1).lean();
-  const page = buildPage(docs, limit);
+  const { docs, ...meta } = await queryPage(Match, { userIds: userId }, pagination, { dateField: 'matchedAt' });
 
-  const conversationIds = page.items.map((match) => match.conversationId).filter(Boolean);
+  const conversationIds = docs.map((match) => match.conversationId).filter(Boolean);
   const counts = await Message.aggregate([
     { $match: { conversationId: { $in: conversationIds } } },
     { $group: { _id: '$conversationId', count: { $sum: 1 } } },
   ]);
   const countByConversation = new Map(counts.map((entry) => [entry._id, entry.count]));
-  const cardFor = await loadUserCards(page.items.map((match) => match.userIds.find((id) => id !== userId)));
+  const cardFor = await loadUserCards(docs.map((match) => match.userIds.find((id) => id !== userId)));
 
-  const items = page.items.map((match) => ({
-    id: match._id,
-    status: match.status,
-    otherUser: cardFor(match.userIds.find((id) => id !== userId)),
-    matchedAt: match.matchedAt ?? match.createdAt,
-    endedAt: match.endedAt ?? null,
-    endedReason: match.endedReason ?? null,
-    conversationId: match.conversationId ?? null,
-    messageCount: countByConversation.get(match.conversationId) ?? 0,
-  }));
-  return { items, nextCursor: page.nextCursor };
+  return {
+    items: docs.map((match) => ({
+      id: match._id,
+      status: match.status,
+      otherUser: cardFor(match.userIds.find((id) => id !== userId)),
+      matchedAt: match.matchedAt ?? match.createdAt,
+      endedAt: match.endedAt ?? null,
+      endedReason: match.endedReason ?? null,
+      conversationId: match.conversationId ?? null,
+      messageCount: countByConversation.get(match.conversationId) ?? 0,
+    })),
+    ...pickPageMeta(meta),
+  };
 }
 
 // GET /admin/users/:userId/sessions — registration + refresh-token login history (no token secrets).
-export async function listUserSessions(userId, { limit, cursor }) {
+export async function listUserSessions(userId, pagination) {
   await loadUser(userId);
-  const docs = await RefreshToken.find({ userId, ...getAfterCursorFilter(cursor) })
-    .sort(getPageSort())
-    .limit(limit + 1)
-    .select('familyId createdAt usedAt revokedAt revokedReason expiresAt')
-    .lean();
-  const page = buildPage(docs, limit);
+  const { docs, ...meta } = await queryPage(RefreshToken, { userId }, pagination);
   const devices = await Device.find({ userId }).select('platform appVersion lastSeenAt createdAt').lean();
 
   return {
-    items: page.items.map((token) => ({
+    items: docs.map((token) => ({
       id: token._id,
       familyId: token.familyId,
       signedInAt: token.createdAt,
@@ -563,13 +560,14 @@ export async function listUserSessions(userId, { limit, cursor }) {
       lastSeenAt: device.lastSeenAt ?? null,
       registeredAt: device.createdAt,
     })),
-    nextCursor: page.nextCursor,
+    ...pickPageMeta(meta),
   };
 }
 
 // GET /admin/users/:userId/activity — merged timeline of registration, logins and staff actions.
-export async function listUserActivity(userId, { limit, cursor }) {
+export async function listUserActivity(userId, pagination) {
   const user = await loadUser(userId);
+  const { limit, cursor, skip, mode, page } = pagination;
   const pageLimit = limit;
 
   const [audits, tokens] = await Promise.all([
@@ -612,6 +610,16 @@ export async function listUserActivity(userId, { limit, cursor }) {
     })),
   ].sort((a, b) => new Date(b.at) - new Date(a.at));
 
+  const total = events.length;
+
+  if (mode === 'offset') {
+    const items = events.slice(skip, skip + pageLimit);
+    return {
+      items,
+      ...pickPageMeta({ nextCursor: null, ...paginationMeta({ page: page ?? 1, limit: pageLimit, total }) }),
+    };
+  }
+
   // Cursor pagination over the in-memory merged timeline (bounded source queries above).
   let start = 0;
   if (cursor) {
@@ -624,9 +632,18 @@ export async function listUserActivity(userId, { limit, cursor }) {
   const hasMore = slice.length > pageLimit;
   const items = hasMore ? slice.slice(0, pageLimit) : slice;
   const last = items[items.length - 1];
+  const nextCursor = hasMore && last ? encodeCursor(new Date(last.at), last.id) : null;
   return {
     items,
-    nextCursor: hasMore && last ? encodeCursor(new Date(last.at), last.id) : null,
+    ...pickPageMeta({
+      nextCursor,
+      total,
+      page: 1,
+      pageSize: pageLimit,
+      totalPages: Math.max(1, Math.ceil(total / pageLimit) || 1),
+      hasMore: Boolean(nextCursor),
+      hasPrev: Boolean(cursor),
+    }),
   };
 }
 
@@ -634,10 +651,11 @@ export async function listUserActivity(userId, { limit, cursor }) {
 export async function exportUserData(actor, userId) {
   if (actor.role !== 'ADMIN') throw ApiError.forbidden('Only admins can export member data.');
   const detail = await getUserDetail(userId, actor.role);
+  const exportPage = { mode: 'cursor', limit: 50, page: 1, skip: 0, cursor: null };
   const [sessions, reportsAgainst, reportsBy] = await Promise.all([
-    listUserSessions(userId, { limit: 50, cursor: null }),
-    listUserReports(userId, { direction: 'against' }, { limit: 50, cursor: null }),
-    listUserReports(userId, { direction: 'by' }, { limit: 50, cursor: null }),
+    listUserSessions(userId, exportPage),
+    listUserReports(userId, { direction: 'against' }, exportPage),
+    listUserReports(userId, { direction: 'by' }, exportPage),
   ]);
 
   const payload = {

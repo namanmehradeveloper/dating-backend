@@ -2,7 +2,11 @@
 // service; role checks live in admin.routes.js and every write is audited by its service.
 
 import { ApiResponse } from '../utils/ApiResponse.js';
-import { parsePagination } from '../utils/pagination.js';
+import { ADMIN_MAX_LIMIT, parsePagination } from '../utils/pagination.js';
+
+function adminPagination(query) {
+  return parsePagination(query, { maxLimit: ADMIN_MAX_LIMIT });
+}
 import * as adminAnalytics from '../services/admin/adminAnalytics.service.js';
 import * as adminBlocks from '../services/admin/adminBlocks.service.js';
 import * as adminCalls from '../services/admin/adminCalls.service.js';
@@ -63,14 +67,14 @@ export async function listLoginActivity(req, res) {
   const filters = validators.validateLoginActivityQuery(req.query);
   return ApiResponse.ok(
     res,
-    await adminLoginHistory.listLoginActivity(filters, parsePagination(req.query)),
+    await adminLoginHistory.listLoginActivity(filters, adminPagination(req.query)),
   );
 }
 
 // GET /admin/users
 export async function listUsers(req, res) {
   const filters = validators.validateUserListQuery(req.query);
-  return ApiResponse.ok(res, await adminUsers.listUsers(filters, parsePagination(req.query), req.user.role));
+  return ApiResponse.ok(res, await adminUsers.listUsers(filters, adminPagination(req.query), req.user.role));
 }
 
 // POST /admin/users — create a member by phone with profile fields.
@@ -93,22 +97,22 @@ export async function getUser(req, res) {
 // GET /admin/users/:userId/reports
 export async function getUserReports(req, res) {
   const options = validators.validateUserReportsQuery(req.query);
-  return ApiResponse.ok(res, await adminUsers.listUserReports(req.params.userId, options, parsePagination(req.query)));
+  return ApiResponse.ok(res, await adminUsers.listUserReports(req.params.userId, options, adminPagination(req.query)));
 }
 
 // GET /admin/users/:userId/matches
 export async function getUserMatches(req, res) {
-  return ApiResponse.ok(res, await adminUsers.listUserMatches(req.params.userId, parsePagination(req.query)));
+  return ApiResponse.ok(res, await adminUsers.listUserMatches(req.params.userId, adminPagination(req.query)));
 }
 
 // GET /admin/users/:userId/sessions
 export async function getUserSessions(req, res) {
-  return ApiResponse.ok(res, await adminUsers.listUserSessions(req.params.userId, parsePagination(req.query)));
+  return ApiResponse.ok(res, await adminUsers.listUserSessions(req.params.userId, adminPagination(req.query)));
 }
 
 // GET /admin/users/:userId/activity
 export async function getUserActivity(req, res) {
-  return ApiResponse.ok(res, await adminUsers.listUserActivity(req.params.userId, parsePagination(req.query)));
+  return ApiResponse.ok(res, await adminUsers.listUserActivity(req.params.userId, adminPagination(req.query)));
 }
 
 // GET /admin/users/:userId/export — ADMIN only (route also gated).
@@ -140,7 +144,7 @@ export async function listDeletionRecords(req, res) {
   const filters = validators.validateDeletionListQuery(req.query);
   return ApiResponse.ok(
     res,
-    await adminDeletions.listDeletionRecords(filters, parsePagination(req.query), req.user.role),
+    await adminDeletions.listDeletionRecords(filters, adminPagination(req.query), req.user.role),
   );
 }
 
@@ -170,7 +174,7 @@ export async function forcePurgeDeletionRecord(req, res) {
 // GET /admin/reports
 export async function listReports(req, res) {
   const filters = validators.validateReportListQuery(req.query);
-  return ApiResponse.ok(res, await adminReports.listReports(filters, parsePagination(req.query)));
+  return ApiResponse.ok(res, await adminReports.listReports(filters, adminPagination(req.query)));
 }
 
 // GET /admin/reports/:reportId
@@ -189,7 +193,7 @@ export async function updateReport(req, res) {
 // GET /admin/verifications
 export async function listVerifications(req, res) {
   const filters = validators.validateVerificationListQuery(req.query);
-  return ApiResponse.ok(res, await adminVerifications.listVerifications(filters, parsePagination(req.query)));
+  return ApiResponse.ok(res, await adminVerifications.listVerifications(filters, adminPagination(req.query)));
 }
 
 // GET /admin/verifications/:verificationId
@@ -225,7 +229,7 @@ export async function updateSubscriptionPlan(req, res) {
 
 export async function listSubscriptions(req, res) {
   const filters = validators.validateSubscriptionListQuery(req.query);
-  return ApiResponse.ok(res, await adminSubscriptions.listSubscriptions(filters, parsePagination(req.query)));
+  return ApiResponse.ok(res, await adminSubscriptions.listSubscriptions(filters, adminPagination(req.query)));
 }
 
 export async function getSubscription(req, res) {
@@ -237,7 +241,7 @@ export async function getSubscription(req, res) {
 // GET /admin/support/tickets
 export async function listTickets(req, res) {
   const filters = validators.validateTicketListQuery(req.query);
-  return ApiResponse.ok(res, await adminSupport.listTickets(filters, parsePagination(req.query)));
+  return ApiResponse.ok(res, await adminSupport.listTickets(filters, adminPagination(req.query)));
 }
 
 // GET /admin/support/tickets/:ticketId
@@ -262,7 +266,7 @@ export async function replyToTicket(req, res) {
 // GET /admin/notifications
 export async function listCampaigns(req, res) {
   const filters = validators.validateCampaignListQuery(req.query);
-  return ApiResponse.ok(res, await adminNotifications.listCampaigns(filters, parsePagination(req.query)));
+  return ApiResponse.ok(res, await adminNotifications.listCampaigns(filters, adminPagination(req.query)));
 }
 
 // POST /admin/notifications (ADMIN)
@@ -276,7 +280,7 @@ export async function sendCampaign(req, res) {
 // GET /admin/audit-logs
 export async function listAuditLogs(req, res) {
   const filters = validators.validateAuditQuery(req.query);
-  return ApiResponse.ok(res, await auditService.listAuditLogs(filters, parsePagination(req.query)));
+  return ApiResponse.ok(res, await auditService.listAuditLogs(filters, adminPagination(req.query)));
 }
 
 // GET /admin/audit-logs/:auditLogId
@@ -320,7 +324,7 @@ export async function listSuspiciousMatches(req, res) {
 }
 
 export async function listReportedMatches(req, res) {
-  return ApiResponse.ok(res, await adminMatches.listReportedMatches(parsePagination(req.query)));
+  return ApiResponse.ok(res, await adminMatches.listReportedMatches(adminPagination(req.query)));
 }
 
 export async function getMatchConfig(req, res) {
@@ -343,7 +347,7 @@ export async function endMatch(req, res) {
 
 export async function listMatches(req, res) {
   const filters = validators.validateMatchListQuery(req.query);
-  return ApiResponse.ok(res, await adminMatches.listMatches(filters, parsePagination(req.query)));
+  return ApiResponse.ok(res, await adminMatches.listMatches(filters, adminPagination(req.query)));
 }
 
 // ---- Swipes ----
@@ -377,7 +381,7 @@ export async function getMemberSwipeReport(req, res) {
 
 export async function listSwipes(req, res) {
   const filters = validators.validateSwipeListQuery(req.query);
-  return ApiResponse.ok(res, await adminSwipes.listSwipes(filters, parsePagination(req.query)));
+  return ApiResponse.ok(res, await adminSwipes.listSwipes(filters, adminPagination(req.query)));
 }
 
 // ---- Blocks ----
@@ -406,7 +410,7 @@ export async function getBlock(req, res) {
 
 export async function listBlocks(req, res) {
   const filters = validators.validateBlockListQuery(req.query);
-  return ApiResponse.ok(res, await adminBlocks.listBlocks(filters, parsePagination(req.query)));
+  return ApiResponse.ok(res, await adminBlocks.listBlocks(filters, adminPagination(req.query)));
 }
 
 // ---- Staff (ADMIN) ----
@@ -417,7 +421,7 @@ export async function getStaffStats(req, res) {
 
 export async function listStaff(req, res) {
   const filters = validators.validateStaffListQuery(req.query);
-  return ApiResponse.ok(res, await adminStaff.listStaff(filters, parsePagination(req.query)));
+  return ApiResponse.ok(res, await adminStaff.listStaff(filters, adminPagination(req.query)));
 }
 
 export async function getStaff(req, res) {
@@ -455,7 +459,7 @@ export async function deleteStaff(req, res) {
 }
 
 export async function listStaffActivity(req, res) {
-  return ApiResponse.ok(res, await adminStaff.listStaffActivity(req.user, req.params.userId, parsePagination(req.query)));
+  return ApiResponse.ok(res, await adminStaff.listStaffActivity(req.user, req.params.userId, adminPagination(req.query)));
 }
 
 export async function beginTwoFactorSetup(req, res) {
@@ -517,12 +521,12 @@ export async function getProfileStats(req, res) {
 
 export async function listProfiles(req, res) {
   const filters = validators.validateProfileListQuery(req.query);
-  return ApiResponse.ok(res, await adminProfiles.listProfiles(filters, parsePagination(req.query)));
+  return ApiResponse.ok(res, await adminProfiles.listProfiles(filters, adminPagination(req.query)));
 }
 
 export async function listPhotoQueue(req, res) {
   const filters = validators.validatePhotoQueueQuery(req.query);
-  return ApiResponse.ok(res, await adminProfiles.listPhotoQueue(filters, parsePagination(req.query)));
+  return ApiResponse.ok(res, await adminProfiles.listPhotoQueue(filters, adminPagination(req.query)));
 }
 
 export async function getProfile(req, res) {
@@ -530,7 +534,7 @@ export async function getProfile(req, res) {
 }
 
 export async function getProfileHistory(req, res) {
-  return ApiResponse.ok(res, await adminProfiles.getProfileHistory(req.params.userId, parsePagination(req.query)));
+  return ApiResponse.ok(res, await adminProfiles.getProfileHistory(req.params.userId, adminPagination(req.query)));
 }
 
 export async function updateProfile(req, res) {
@@ -580,7 +584,7 @@ export async function getMessagingStats(req, res) {
 
 export async function listConversations(req, res) {
   const filters = validators.validateMessagingListQuery(req.query);
-  return ApiResponse.ok(res, await adminMessaging.listConversations(filters, parsePagination(req.query)));
+  return ApiResponse.ok(res, await adminMessaging.listConversations(filters, adminPagination(req.query)));
 }
 
 export async function getAnalytics(req, res) {
@@ -596,7 +600,7 @@ export async function getMonitoring(req, res) {
 
 export async function listCms(req, res) {
   const filters = validators.validateCmsListQuery(req.query);
-  return ApiResponse.ok(res, await adminCms.listCms(filters, parsePagination(req.query)));
+  return ApiResponse.ok(res, await adminCms.listCms(filters, adminPagination(req.query)));
 }
 
 export async function getCms(req, res) {
@@ -621,7 +625,7 @@ export async function getCouponStats(req, res) {
 
 export async function listCoupons(req, res) {
   const filters = validators.validateCouponListQuery(req.query);
-  return ApiResponse.ok(res, await adminCoupons.listCoupons(filters, parsePagination(req.query)));
+  return ApiResponse.ok(res, await adminCoupons.listCoupons(filters, adminPagination(req.query)));
 }
 
 export async function createCoupon(req, res) {
@@ -642,7 +646,7 @@ export async function getReferralStats(req, res) {
 
 export async function listReferrals(req, res) {
   const filters = validators.validateReferralListQuery(req.query);
-  return ApiResponse.ok(res, await adminReferrals.listReferrals(filters, parsePagination(req.query)));
+  return ApiResponse.ok(res, await adminReferrals.listReferrals(filters, adminPagination(req.query)));
 }
 
 export async function createReferral(req, res) {
@@ -663,7 +667,7 @@ export async function getFraudStatus(req, res) {
 
 export async function listFraudSignals(req, res) {
   const filters = validators.validateFraudSignalListQuery(req.query);
-  return ApiResponse.ok(res, await adminFraud.listRiskSignals(filters, parsePagination(req.query)));
+  return ApiResponse.ok(res, await adminFraud.listRiskSignals(filters, adminPagination(req.query)));
 }
 
 export async function scanFraudUser(req, res) {
@@ -679,7 +683,7 @@ export async function updateFraudSignal(req, res) {
 
 export async function listExperiments(req, res) {
   const filters = validators.validateExperimentListQuery(req.query);
-  return ApiResponse.ok(res, await adminExperiments.listExperiments(filters, parsePagination(req.query)));
+  return ApiResponse.ok(res, await adminExperiments.listExperiments(filters, adminPagination(req.query)));
 }
 
 export async function getExperiment(req, res) {
@@ -709,7 +713,7 @@ export async function getCallsStats(req, res) {
 
 export async function listCalls(req, res) {
   const filters = validators.validateCallsListQuery(req.query);
-  return ApiResponse.ok(res, await adminCalls.listCalls(filters, parsePagination(req.query)));
+  return ApiResponse.ok(res, await adminCalls.listCalls(filters, adminPagination(req.query)));
 }
 
 export async function getCall(req, res) {
@@ -727,7 +731,7 @@ export async function getPaymentsStats(req, res) {
 
 export async function listPayments(req, res) {
   const filters = validators.validatePaymentsListQuery(req.query);
-  return ApiResponse.ok(res, await adminPayments.listPayments(filters, parsePagination(req.query)));
+  return ApiResponse.ok(res, await adminPayments.listPayments(filters, adminPagination(req.query)));
 }
 
 export async function getPayment(req, res) {
@@ -738,7 +742,7 @@ export async function getPayment(req, res) {
 
 export async function listStoreItems(req, res) {
   const filters = validators.validateStoreItemListQuery(req.query);
-  return ApiResponse.ok(res, await storeService.adminListItems(filters, parsePagination(req.query)));
+  return ApiResponse.ok(res, await storeService.adminListItems(filters, adminPagination(req.query)));
 }
 
 export async function createStoreItem(req, res) {
@@ -775,5 +779,5 @@ export async function adjustStoreWallet(req, res) {
 
 export async function listStorePurchases(req, res) {
   const filters = validators.validateStorePurchaseListQuery(req.query);
-  return ApiResponse.ok(res, await storeService.adminListPurchases(filters, parsePagination(req.query)));
+  return ApiResponse.ok(res, await storeService.adminListPurchases(filters, adminPagination(req.query)));
 }

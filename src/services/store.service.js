@@ -9,7 +9,14 @@ import { StoreItem } from '../models/StoreItem.js';
 import { StorePurchase } from '../models/StorePurchase.js';
 import { Wallet } from '../models/Wallet.js';
 import { ApiError } from '../utils/ApiError.js';
-import { buildPage, getAfterCursorFilter, getPageSort } from '../utils/pagination.js';
+import {
+  buildPage,
+  finishOffsetPage,
+  getAfterCursorFilter,
+  getPageSort,
+  pickPageMeta,
+  queryPage,
+} from '../utils/pagination.js';
 
 const CHECKOUT_TTL_MS = 30 * 60 * 1000;
 const DEMO_OUTCOMES = new Set(['SUCCESS', 'FAILURE']);
@@ -471,7 +478,7 @@ export async function assertOwnsEmojiPack(userId, packId, emoji, session) {
 }
 
 // Admin helpers
-export async function adminListItems(filters, { limit, cursor }) {
+export async function adminListItems(filters, pagination) {
   await ensureDefaultStoreItems();
   const query = {};
   if (filters.kind) query.kind = filters.kind;
@@ -480,12 +487,35 @@ export async function adminListItems(filters, { limit, cursor }) {
     const re = new RegExp(filters.q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
     query.$or = [{ _id: re }, { title: re }, { description: re }];
   }
-  const docs = await StoreItem.find({ ...query, ...getAfterCursorFilter(cursor) })
-    .sort({ sortOrder: 1, _id: 1 })
-    .limit(limit + 1)
-    .lean();
-  const page = buildPage(docs, limit);
-  return { items: page.items.map(presentStoreItem), nextCursor: page.nextCursor };
+  const sort = { sortOrder: 1, _id: 1 };
+  if (pagination.mode === 'offset') {
+    const [rows, total] = await Promise.all([
+      StoreItem.find(query).sort(sort).skip(pagination.skip).limit(pagination.limit).lean(),
+      StoreItem.countDocuments(query),
+    ]);
+    const page = finishOffsetPage(rows, pagination, total);
+    return { items: page.docs.map(presentStoreItem), ...pickPageMeta(page) };
+  }
+  const [docs, total] = await Promise.all([
+    StoreItem.find({ ...query, ...getAfterCursorFilter(pagination.cursor) })
+      .sort(sort)
+      .limit(pagination.limit + 1)
+      .lean(),
+    StoreItem.countDocuments(query),
+  ]);
+  const page = buildPage(docs, pagination.limit);
+  return {
+    items: page.items.map(presentStoreItem),
+    ...pickPageMeta({
+      nextCursor: page.nextCursor,
+      page: 1,
+      pageSize: pagination.limit,
+      total,
+      totalPages: Math.max(1, Math.ceil(total / pagination.limit) || 1),
+      hasMore: Boolean(page.nextCursor),
+      hasPrev: Boolean(pagination.cursor),
+    }),
+  };
 }
 
 export async function adminUpsertItem(actor, input, { recordAudit }) {
@@ -602,7 +632,7 @@ export async function adminAdjustWallet(actor, userId, { deltaCoins, reason }, {
   return getWallet(userId);
 }
 
-export async function adminListPurchases(filters, { limit, cursor }) {
+export async function adminListPurchases(filters, pagination) {
   const query = {};
   if (filters.status) query.status = filters.status;
   if (filters.userId) query.userId = filters.userId;
@@ -610,10 +640,6 @@ export async function adminListPurchases(filters, { limit, cursor }) {
     const re = new RegExp(filters.q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
     query.$or = [{ checkoutId: re }, { itemId: re }, { userId: re }];
   }
-  const docs = await StorePurchase.find({ ...query, ...getAfterCursorFilter(cursor) })
-    .sort(getPageSort())
-    .limit(limit + 1)
-    .lean();
-  const page = buildPage(docs, limit);
-  return { items: page.items.map(presentPurchase), nextCursor: page.nextCursor };
+  const { docs, ...meta } = await queryPage(StorePurchase, query, pagination);
+  return { items: docs.map(presentPurchase), ...pickPageMeta(meta) };
 }

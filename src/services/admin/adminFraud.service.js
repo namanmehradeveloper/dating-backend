@@ -6,7 +6,7 @@ import { Swipe } from '../../models/Swipe.js';
 import { User } from '../../models/User.js';
 import { UserRiskSignal, RISK_STATUSES } from '../../models/UserRiskSignal.js';
 import { ApiError } from '../../utils/ApiError.js';
-import { buildPage, getAfterCursorFilter, getPageSort } from '../../utils/pagination.js';
+import { pickPageMeta, queryPage } from '../../utils/pagination.js';
 import { recordAudit } from '../audit.service.js';
 import { loadUserCards } from './adminPresenter.js';
 
@@ -90,15 +90,14 @@ export async function scanUser(actor, userId) {
 }
 
 // GET /admin/fraud/signals
-export async function listRiskSignals(filters, { limit, cursor }) {
+export async function listRiskSignals(filters, pagination) {
   const query = {};
   if (filters.status) query.status = filters.status;
   if (filters.userId) query.userId = filters.userId;
 
-  const docs = await UserRiskSignal.find({ ...query, ...getAfterCursorFilter(cursor) }).sort(getPageSort()).limit(limit + 1).lean();
-  const page = buildPage(docs, limit);
-  const cardFor = await loadUserCards(page.items.flatMap((doc) => [doc.userId, doc.reviewedBy]));
-  return { items: page.items.map((doc) => presentSignal(doc, cardFor)), nextCursor: page.nextCursor };
+  const { docs, ...meta } = await queryPage(UserRiskSignal, query, pagination);
+  const cardFor = await loadUserCards(docs.flatMap((doc) => [doc.userId, doc.reviewedBy]));
+  return { items: docs.map((doc) => presentSignal(doc, cardFor)), ...pickPageMeta(meta) };
 }
 
 // PATCH /admin/fraud/signals/:id

@@ -3,7 +3,7 @@
 import { ReferralCode } from '../../models/ReferralCode.js';
 import { User } from '../../models/User.js';
 import { ApiError } from '../../utils/ApiError.js';
-import { buildPage, getAfterCursorFilter, getPageSort, mergeFilters } from '../../utils/pagination.js';
+import { pickPageMeta, queryPage } from '../../utils/pagination.js';
 import { recordAudit } from '../audit.service.js';
 import { loadUserCards, resolveMemberIdsByQuery } from './adminPresenter.js';
 
@@ -22,7 +22,7 @@ function presentReferral(doc, cardFor) {
 }
 
 // GET /admin/referrals
-export async function listReferrals(filters, { limit, cursor }) {
+export async function listReferrals(filters, pagination) {
   const query = {};
   if (filters.ownerUserId) query.ownerUserId = filters.ownerUserId;
   if (filters.isActive !== undefined) query.isActive = filters.isActive;
@@ -33,10 +33,9 @@ export async function listReferrals(filters, { limit, cursor }) {
     if (ownerIds.length) query.$or.push({ ownerUserId: { $in: ownerIds } });
   }
 
-  const docs = await ReferralCode.find(mergeFilters(query, getAfterCursorFilter(cursor))).sort(getPageSort()).limit(limit + 1).lean();
-  const page = buildPage(docs, limit);
-  const cardFor = await loadUserCards(page.items.map((doc) => doc.ownerUserId));
-  return { items: page.items.map((doc) => presentReferral(doc, cardFor)), nextCursor: page.nextCursor };
+  const { docs, ...meta } = await queryPage(ReferralCode, query, pagination);
+  const cardFor = await loadUserCards(docs.map((doc) => doc.ownerUserId));
+  return { items: docs.map((doc) => presentReferral(doc, cardFor)), ...pickPageMeta(meta) };
 }
 
 // POST /admin/referrals

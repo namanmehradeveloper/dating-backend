@@ -2,7 +2,7 @@
 
 import { GUEST_AUTHOR_ID, SupportTicket } from '../../models/SupportTicket.js';
 import { ApiError } from '../../utils/ApiError.js';
-import { buildPage, getAfterCursorFilter, getPageSort } from '../../utils/pagination.js';
+import { pickPageMeta, queryPage } from '../../utils/pagination.js';
 import { recordAudit } from '../audit.service.js';
 import { notifyUser } from '../notification.service.js';
 import { loadUserCards } from './adminPresenter.js';
@@ -28,7 +28,7 @@ function presentTicketSummary(ticket, cardFor) {
 }
 
 // GET /admin/support/tickets — newest first, filtered by status and category.
-export async function listTickets(filters, { limit, cursor }) {
+export async function listTickets(filters, pagination) {
   const query = {};
   if (filters.status) query.status = filters.status;
   if (filters.category) query.category = filters.category;
@@ -42,10 +42,9 @@ export async function listTickets(filters, { limit, cursor }) {
       { contactEmail: pattern },
     ];
   }
-  const docs = await SupportTicket.find({ ...query, ...getAfterCursorFilter(cursor) }).sort(getPageSort()).limit(limit + 1).lean();
-  const page = buildPage(docs, limit);
-  const cardFor = await loadUserCards(page.items.map((ticket) => ticket.userId).filter(Boolean));
-  return { items: page.items.map((ticket) => presentTicketSummary(ticket, cardFor)), nextCursor: page.nextCursor };
+  const { docs, ...meta } = await queryPage(SupportTicket, query, pagination);
+  const cardFor = await loadUserCards(docs.map((ticket) => ticket.userId).filter(Boolean));
+  return { items: docs.map((ticket) => presentTicketSummary(ticket, cardFor)), ...pickPageMeta(meta) };
 }
 
 // GET /admin/support/tickets/:ticketId — the full conversation, with staff authors identified.

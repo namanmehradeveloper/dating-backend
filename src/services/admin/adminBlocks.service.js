@@ -6,7 +6,15 @@ import { Match } from '../../models/Match.js';
 import { Profile } from '../../models/Profile.js';
 import { Report } from '../../models/Report.js';
 import { ApiError } from '../../utils/ApiError.js';
-import { buildPage, getAfterCursorFilter, getPageSort } from '../../utils/pagination.js';
+import {
+  buildPage,
+  finishOffsetPage,
+  getAfterCursorFilter,
+  getPageSort,
+  paginationMeta,
+  pickPageMeta,
+  queryPage,
+} from '../../utils/pagination.js';
 import { isValidId } from '../../validators/common.js';
 import { getSetting } from '../settings.service.js';
 import { loadUserCards } from './adminPresenter.js';
@@ -91,7 +99,7 @@ function presentBlock(block, cardFor, { mutual = false, openReports = 0 } = {}) 
 }
 
 // GET /admin/blocks — newest first.
-export async function listBlocks(filters, { limit, cursor }) {
+export async function listBlocks(filters, pagination) {
   const query = {};
   if (filters.blockerId) query.blockerId = filters.blockerId;
   if (filters.blockedId) query.blockedId = filters.blockedId;
@@ -102,14 +110,16 @@ export async function listBlocks(filters, { limit, cursor }) {
     else if (resolved.userIds?.length) {
       query.$or = [{ blockerId: { $in: resolved.userIds } }, { blockedId: { $in: resolved.userIds } }];
     } else {
-      return { items: [], nextCursor: null };
+      return {
+        items: [],
+        ...pickPageMeta({ nextCursor: null, ...paginationMeta({ page: pagination.page ?? 1, limit: pagination.limit, total: 0 }) }),
+      };
     }
   }
 
   if (filters.mutual === 'true') {
-    // Mutual blocks: A blocked B and B blocked A. Resolve via aggregation.
-    const mutualDocs = await Block.aggregate([
-      { $match: { ...query, ...getAfterCursorFilter(cursor) } },
+    const pipeline = [
+      { $match: query },
       {
         $lookup: {
           from: 'blocks',
@@ -129,9 +139,41 @@ export async function listBlocks(filters, { limit, cursor }) {
       },
       { $match: { 'reciprocal.0': { $exists: true } } },
       { $sort: getPageSort() },
-      { $limit: limit + 1 },
+    ];
+
+    if (pagination.mode === 'offset') {
+      const [facet] = await Block.aggregate([
+        ...pipeline,
+        {
+          $facet: {
+            items: [{ $skip: pagination.skip }, { $limit: pagination.limit }],
+            total: [{ $count: 'count' }],
+          },
+        },
+      ]);
+      const rows = facet?.items ?? [];
+      const total = facet?.total?.[0]?.count ?? 0;
+      const page = finishOffsetPage(rows, pagination, total);
+      const cardFor = await loadUserCards(page.docs.flatMap((block) => [block.blockerId, block.blockedId]));
+      const pairs = page.docs.map((block) => [block.blockerId, block.blockedId]);
+      const reportCounts = await reportCountsForPairs(pairs);
+      return {
+        items: page.docs.map((block) =>
+          presentBlock(block, cardFor, {
+            mutual: true,
+            openReports: reportCounts.get(buildPairKey(block.blockerId, block.blockedId)) ?? 0,
+          }),
+        ),
+        ...pickPageMeta(page),
+      };
+    }
+
+    const cursorDocs = await Block.aggregate([
+      { $match: { ...query, ...getAfterCursorFilter(pagination.cursor) } },
+      ...pipeline.slice(1),
+      { $limit: pagination.limit + 1 },
     ]);
-    const page = buildPage(mutualDocs, limit);
+    const page = buildPage(cursorDocs, pagination.limit);
     const cardFor = await loadUserCards(page.items.flatMap((block) => [block.blockerId, block.blockedId]));
     const pairs = page.items.map((block) => [block.blockerId, block.blockedId]);
     const reportCounts = await reportCountsForPairs(pairs);
@@ -146,21 +188,20 @@ export async function listBlocks(filters, { limit, cursor }) {
     };
   }
 
-  const docs = await Block.find({ ...query, ...getAfterCursorFilter(cursor) }).sort(getPageSort()).limit(limit + 1).lean();
-  const page = buildPage(docs, limit);
-  const cardFor = await loadUserCards(page.items.flatMap((block) => [block.blockerId, block.blockedId]));
-  const pairs = page.items.map((block) => [block.blockerId, block.blockedId]);
+  const { docs, ...meta } = await queryPage(Block, query, pagination);
+  const cardFor = await loadUserCards(docs.flatMap((block) => [block.blockerId, block.blockedId]));
+  const pairs = docs.map((block) => [block.blockerId, block.blockedId]);
   const [mutualKeys, reportCounts] = await Promise.all([mutualPairSet(pairs), reportCountsForPairs(pairs)]);
 
   return {
-    items: page.items.map((block) => {
+    items: docs.map((block) => {
       const key = buildPairKey(block.blockerId, block.blockedId);
       return presentBlock(block, cardFor, {
         mutual: mutualKeys.has(key),
         openReports: reportCounts.get(key) ?? 0,
       });
     }),
-    nextCursor: page.nextCursor,
+    ...pickPageMeta(meta),
   };
 }
 

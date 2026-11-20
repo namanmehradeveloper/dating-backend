@@ -6,7 +6,7 @@ import { Profile } from '../../models/Profile.js';
 import { Report } from '../../models/Report.js';
 import { ApiError } from '../../utils/ApiError.js';
 import { buildFileUrl } from '../../utils/fileUrls.js';
-import { buildPage, getAfterCursorFilter, getPageSort, mergeFilters } from '../../utils/pagination.js';
+import { pickPageMeta, queryPage } from '../../utils/pagination.js';
 import { recordAudit } from '../audit.service.js';
 import { loadUserCards } from './adminPresenter.js';
 
@@ -35,7 +35,7 @@ export async function presentReportSummaries(reports) {
 }
 
 // GET /admin/reports — newest first.
-export async function listReports(filters, { limit, cursor }) {
+export async function listReports(filters, pagination) {
   const query = {};
   for (const field of ['status', 'targetType', 'reason']) {
     if (filters[field]) query[field] = filters[field];
@@ -44,9 +44,8 @@ export async function listReports(filters, { limit, cursor }) {
     const pattern = new RegExp(filters.q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
     query.$or = [{ _id: filters.q }, { targetId: pattern }, { reporterId: filters.q }, { targetUserId: filters.q }];
   }
-  const docs = await Report.find(mergeFilters(query, getAfterCursorFilter(cursor))).sort(getPageSort()).limit(limit + 1).lean();
-  const page = buildPage(docs, limit);
-  return { items: await presentReportSummaries(page.items), nextCursor: page.nextCursor };
+  const { docs, ...meta } = await queryPage(Report, query, pagination);
+  return { items: await presentReportSummaries(docs), ...pickPageMeta(meta) };
 }
 
 // Loads what was reported so a moderator can judge it: the photo, the message text and photo, or the profile.
