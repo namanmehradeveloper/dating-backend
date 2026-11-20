@@ -107,6 +107,62 @@ export function validateLoginActivityQuery(query) {
   return { q, fromDate, toDate };
 }
 
+const BASICS_KEY_PATTERN = /^[a-z][a-zA-Z0-9_]{0,39}$/;
+const OPTION_ID_PATTERN = /^[A-Z][A-Z0-9_]{0,39}$/;
+
+// Optional approximate location → GeoJSON Point (same rounding as member onboarding).
+function checkCreateLocation(details, value) {
+  if (value === undefined || value === null) return undefined;
+  const { latitude, longitude } = isPlainObject(value) ? value : {};
+  const isValid =
+    typeof latitude === 'number' &&
+    typeof longitude === 'number' &&
+    latitude >= -90 &&
+    latitude <= 90 &&
+    longitude >= -180 &&
+    longitude <= 180;
+  if (!isValid) {
+    details.push({ field: 'location', reason: 'INVALID' });
+    return undefined;
+  }
+  const round = (number) => Math.round(number * 100) / 100;
+  return { type: 'Point', coordinates: [round(longitude), round(latitude)] };
+}
+
+// Optional lifestyle basics for create (same shape as onboarding; not clearable).
+function checkCreateBasics(details, value) {
+  if (value === undefined || value === null) return undefined;
+  const entries = isPlainObject(value) ? Object.entries(value) : null;
+  const isValid =
+    entries &&
+    entries.length <= 20 &&
+    entries.every(([key, option]) => BASICS_KEY_PATTERN.test(key) && typeof option === 'string' && OPTION_ID_PATTERN.test(option));
+  if (!isValid) {
+    details.push({ field: 'basics', reason: 'UNKNOWN_OPTION' });
+    return undefined;
+  }
+  return entries.length > 0 ? Object.fromEntries(entries) : undefined;
+}
+
+// Optional prompt for create (same shape as onboarding; not clearable).
+function checkCreatePrompt(details, value) {
+  if (value === undefined || value === null) return undefined;
+  if (!isPlainObject(value)) {
+    details.push({ field: 'prompt', reason: 'INVALID' });
+    return undefined;
+  }
+  if (typeof value.promptId !== 'string' || !OPTION_ID_PATTERN.test(value.promptId)) {
+    details.push({ field: 'prompt.promptId', reason: 'UNKNOWN_OPTION' });
+    return undefined;
+  }
+  const answer = trimmedText(value.answer);
+  if (!answer || answer.length > 150) {
+    details.push({ field: 'prompt.answer', reason: 'INVALID' });
+    return undefined;
+  }
+  return { promptId: value.promptId, answer };
+}
+
 // POST /admin/users — create a member by phone with profile fields.
 export function validateUserCreate(body) {
   requireObjectBody(body);
@@ -136,6 +192,12 @@ export function validateUserCreate(body) {
     occupation: isMissing(body.occupation)
       ? undefined
       : checkText(details, 'occupation', body.occupation, { max: 80, reason: 'INVALID_LENGTH', required: false }),
+    interestIds: isMissing(body.interestIds)
+      ? undefined
+      : checkUniqueStringList(details, 'interestIds', body.interestIds, { min: 0, max: 10, reason: 'COUNT_0_10' }),
+    basics: checkCreateBasics(details, body.basics),
+    prompt: checkCreatePrompt(details, body.prompt),
+    location: checkCreateLocation(details, body.location),
     status: checkEnum(details, 'status', body.status ?? 'ACTIVE', ACCOUNT_STATUSES),
     verificationStatus: checkEnum(details, 'verificationStatus', body.verificationStatus ?? 'NONE', VERIFICATION_STATUSES),
     visibilityStatus: checkEnum(details, 'visibilityStatus', body.visibilityStatus ?? 'VISIBLE', VISIBILITY_STATUSES),
@@ -147,6 +209,17 @@ export function validateUserCreate(body) {
 
   throwIfInvalid(details);
   return input;
+}
+
+// POST /admin/users/:userId/photos — multipart field "files" with 1–6 images.
+export function validateUserPhotoUpload(files) {
+  if (!Array.isArray(files) || files.length === 0) {
+    throw ApiError.validation([{ field: 'files', reason: 'REQUIRED' }]);
+  }
+  if (files.length > 6) {
+    throw ApiError.validation([{ field: 'files', reason: 'COUNT_1_6' }]);
+  }
+  return files;
 }
 
 // POST /admin/users/:userId/deletion: { reason (3–500) }.
@@ -714,9 +787,6 @@ export function validateTwoFactorCodeBody(body) {
   throwIfInvalid(details);
   return { code };
 }
-
-const BASICS_KEY_PATTERN = /^[a-z][a-zA-Z0-9_]{0,39}$/;
-const OPTION_ID_PATTERN = /^[A-Z][A-Z0-9_]{0,39}$/;
 
 function checkClearableText(details, field, value, max, reason) {
   if (value === undefined) return undefined;

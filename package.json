@@ -14,6 +14,8 @@
     "seed:admin": "node scripts/seedAdmin.js",
     "seed:verifications": "node scripts/seedVerifications.js",
     "seed:swipe-abuse": "node scripts/seedSwipeAbuse.js",
+    "seed:test-users": "node scripts/seedTestUsers.js",
+
     "test": "vitest run",
     "test:watch": "vitest"
   },

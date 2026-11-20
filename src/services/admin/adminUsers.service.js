@@ -5,6 +5,7 @@ import { env } from '../../config/env.js';
 import { AuditLog } from '../../models/AuditLog.js';
 import { Device } from '../../models/Device.js';
 import { Match } from '../../models/Match.js';
+import { Media } from '../../models/Media.js';
 import { Message } from '../../models/Message.js';
 import { Profile } from '../../models/Profile.js';
 import { RefreshToken } from '../../models/RefreshToken.js';
@@ -14,13 +15,16 @@ import { User } from '../../models/User.js';
 import { UserRiskSignal } from '../../models/UserRiskSignal.js';
 import { calculateAge, MINIMUM_AGE } from '../../utils/age.js';
 import { ApiError } from '../../utils/ApiError.js';
+import { buildFileUrl } from '../../utils/fileUrls.js';
 import { buildPage, encodeCursor, getAfterCursorFilter, getPageSort, mergeFilters } from '../../utils/pagination.js';
 import { isValidId } from '../../validators/common.js';
 import { DELETION_GRACE_DAYS, requestDeletion } from '../account.service.js';
 import { recordAudit } from '../audit.service.js';
-import { loadInterestLabels } from '../interest.service.js';
+import { areKnownInterestIds, loadInterestLabels } from '../interest.service.js';
 import { endAllMatchesForUser } from '../match.service.js';
+import { deleteMedia, saveUploadedImage } from '../media.service.js';
 import { notifyUser } from '../notification.service.js';
+import { MAX_PHOTOS } from '../profilePhotos.service.js';
 import { assertCanManageTargetRole, assertNotLastActiveSuperAdmin } from '../rbac.service.js';
 import { endUserSockets, getOnlineUserCount, getOnlineUserIds, isUserOnline } from '../realtime.service.js';
 import { presentEntitlement } from '../subscription.service.js';
@@ -246,6 +250,11 @@ export async function createUser(actor, input, viewerRole) {
     throw ApiError.conflict('An account with this email already exists.');
   }
 
+  const interestIds = input.interestIds ?? [];
+  if (interestIds.length && !(await areKnownInterestIds(interestIds))) {
+    throw ApiError.validation([{ field: 'interestIds', reason: 'UNKNOWN_INTEREST' }]);
+  }
+
   const user = await User.create({
     phoneNumber: input.phoneNumber,
     ...(input.email ? { email: input.email } : {}),
@@ -265,8 +274,11 @@ export async function createUser(actor, input, viewerRole) {
     bio: input.bio,
     city: input.city,
     occupation: input.occupation,
+    ...(input.basics ? { basics: input.basics } : {}),
+    ...(input.prompt ? { prompt: input.prompt } : {}),
+    ...(input.location ? { location: input.location } : {}),
     photos: [],
-    interestIds: [],
+    interestIds,
     visibilityStatus: input.visibilityStatus,
     preferences: {
       minAge: input.minAge,
@@ -288,6 +300,8 @@ export async function createUser(actor, input, viewerRole) {
       displayName: input.displayName,
       status: input.status,
       verificationStatus: input.verificationStatus,
+      interestCount: interestIds.length,
+      hasLocation: Boolean(input.location),
     },
   });
 
@@ -297,6 +311,136 @@ export async function createUser(actor, input, viewerRole) {
     riskFlags: [],
     riskScore: 0,
     possibleDuplicate: false,
+  };
+}
+
+function presentAttachedPhoto(photo) {
+  return {
+    id: photo._id,
+    mediaId: photo.mediaId,
+    url: buildFileUrl(photo.relativePath),
+    order: photo.order,
+    moderationStatus: photo.moderationStatus ?? 'APPROVED',
+  };
+}
+
+function failureReasonFrom(error) {
+  if (error instanceof ApiError && error.code === 'MEDIA_REJECTED') {
+    return error.details?.[0]?.reason ?? 'REJECTED';
+  }
+  if (error instanceof ApiError && error.code === 'VALIDATION_ERROR') {
+    return error.details?.[0]?.reason ?? 'INVALID';
+  }
+  return 'UPLOAD_FAILED';
+}
+
+// POST /admin/users/:userId/photos — upload 1–6 profile photos owned by the member.
+// Mirrors onboarding attach (APPROVED) because admin provisioning is an authorized moderation path.
+// Partial failures are reported per file; successful attaches are kept; orphan media is deleted.
+export async function uploadUserPhotos(actor, userId, files, viewerRole) {
+  const user = await loadUser(userId);
+  if (user.role !== 'USER') throw ApiError.forbidden('Photos can only be added to member accounts.');
+
+  const profile = await Profile.findOne({ userId });
+  if (!profile) throw ApiError.conflict('Member has no profile yet.');
+
+  const attached = [];
+  const failures = [];
+  let photoCount = profile.photos.length;
+
+  for (let index = 0; index < files.length; index += 1) {
+    if (photoCount >= MAX_PHOTOS) {
+      failures.push({ index, reason: 'MAX_PHOTOS' });
+      continue;
+    }
+
+    let mediaId = null;
+    try {
+      const uploaded = await saveUploadedImage(userId, 'PROFILE_PHOTO', files[index]);
+      mediaId = uploaded.mediaId;
+
+      if (profile.photos.some((photo) => photo.mediaId === mediaId) || attached.some((photo) => photo.mediaId === mediaId)) {
+        const media = await Media.findById(mediaId);
+        if (media) await deleteMedia(media);
+        failures.push({ index, reason: 'DUPLICATE' });
+        continue;
+      }
+
+      const media = await Media.findById(mediaId);
+      if (!media || media.ownerId !== userId || media.purpose !== 'PROFILE_PHOTO' || media.status !== 'APPROVED') {
+        if (media) await deleteMedia(media);
+        failures.push({ index, reason: 'UNKNOWN_MEDIA' });
+        continue;
+      }
+
+      const photoFields = {
+        mediaId: media._id,
+        relativePath: media.relativePath,
+        order: photoCount,
+        moderationStatus: 'APPROVED',
+      };
+
+      const result = await Profile.updateOne(
+        {
+          userId,
+          [`photos.${MAX_PHOTOS - 1}`]: { $exists: false },
+          'photos.mediaId': { $ne: media._id },
+        },
+        { $push: { photos: photoFields } },
+      );
+
+      if (result.modifiedCount === 0) {
+        await deleteMedia(media);
+        failures.push({ index, reason: photoCount >= MAX_PHOTOS ? 'MAX_PHOTOS' : 'DUPLICATE' });
+        continue;
+      }
+
+      // Reload the pushed subdocument so we return its generated photo id.
+      const refreshed = await Profile.findOne({ userId }).select('photos').lean();
+      const saved = [...(refreshed?.photos ?? [])]
+        .sort((a, b) => a.order - b.order)
+        .find((photo) => photo.mediaId === media._id);
+      if (!saved) {
+        await deleteMedia(media);
+        failures.push({ index, reason: 'UPLOAD_FAILED' });
+        continue;
+      }
+
+      profile.photos.push(saved);
+      photoCount += 1;
+      attached.push(presentAttachedPhoto(saved));
+    } catch (error) {
+      if (mediaId) {
+        const media = await Media.findById(mediaId);
+        if (media && media.status !== 'DELETED') await deleteMedia(media).catch(() => {});
+      }
+      failures.push({ index, reason: failureReasonFrom(error) });
+    }
+  }
+
+  await recordAudit(actor, {
+    action: 'USER_PHOTOS_UPLOADED',
+    targetType: 'USER',
+    targetId: userId,
+    metadata: {
+      attachedCount: attached.length,
+      failureCount: failures.length,
+      failures,
+    },
+  });
+
+  return {
+    photos: attached,
+    failures,
+    photoCount,
+    user: {
+      ...presentAdminUserSummary(
+        user,
+        (await Profile.findOne({ userId }).lean()) ?? profile.toObject?.() ?? profile,
+        viewerRole,
+      ),
+      isOnline: isUserOnline(userId),
+    },
   };
 }
 

@@ -4,6 +4,7 @@
 import { Router } from 'express';
 import * as adminController from '../controllers/admin.controller.js';
 import { requireAnyPermission, requireAuth, requirePermission, requireStaff } from '../middlewares/auth.middleware.js';
+import { receiveImageUploads } from '../middlewares/upload.middleware.js';
 import { byUser, createRateLimiter, MINUTE } from '../utils/rateLimit.js';
 
 const router = Router();
@@ -11,6 +12,7 @@ const router = Router();
 const adminLimit = createRateLimiter({ windowMs: MINUTE, max: 300, keyFrom: byUser });
 const can = (module, action) => requirePermission(module, action);
 const canStaffOrRolesView = requireAnyPermission(['STAFF', 'VIEW'], ['ROLES', 'VIEW']);
+const canCreateOrEditUsers = requireAnyPermission(['USERS', 'CREATE'], ['USERS', 'EDIT']);
 
 router.use(requireAuth, requireStaff, adminLimit);
 
@@ -25,6 +27,7 @@ router.get('/login-activity', can('AUDIT_LOGS', 'VIEW'), adminController.listLog
 router.get('/users/stats', can('USERS', 'VIEW'), adminController.getUserStats);
 router.get('/users', can('USERS', 'VIEW'), adminController.listUsers);
 router.post('/users', can('USERS', 'CREATE'), adminController.createUser);
+router.post('/users/:userId/photos', canCreateOrEditUsers, receiveImageUploads, adminController.uploadUserPhotos);
 router.get('/users/:userId', can('USERS', 'VIEW'), adminController.getUser);
 router.get('/users/:userId/reports', can('USERS', 'VIEW'), adminController.getUserReports);
 router.get('/users/:userId/matches', can('USERS', 'VIEW'), adminController.getUserMatches);

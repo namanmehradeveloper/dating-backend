@@ -79,6 +79,12 @@ export async function createUser(req, res) {
   return ApiResponse.created(res, await adminUsers.createUser(req.user, input, req.user.role));
 }
 
+// POST /admin/users/:userId/photos — multipart upload of 1–6 profile photos for a member.
+export async function uploadUserPhotos(req, res) {
+  const files = validators.validateUserPhotoUpload(req.files);
+  return ApiResponse.created(res, await adminUsers.uploadUserPhotos(req.user, req.params.userId, files, req.user.role));
+}
+
 // GET /admin/users/:userId
 export async function getUser(req, res) {
   return ApiResponse.ok(res, await adminUsers.getUserDetail(req.params.userId, req.user.role));
